@@ -1,0 +1,6 @@
+Client/
+Docs/
+**/bin
+**/obj
+**/cert
+.git
