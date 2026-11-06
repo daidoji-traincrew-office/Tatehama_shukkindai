@@ -1,0 +1,26 @@
+name: Unit Test
+
+# runner が未定のため、トリガーを一時的に無効化している。
+# 現在は workflow_call(他の workflow からの呼び出し)でしか起動しない。
+# runner が決まったら、下の pull_request / workflow_dispatch のコメントを外し、workflow_call を消すこと。
+#
+# on:
+#   pull_request:
+#   workflow_dispatch:
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-test:
+    # runner は要検討(org のセルフホストランナーを使うか未決定)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Unit test
+        run: dotnet test --project Server/Tatehama.Shukkindai.Server.UT
