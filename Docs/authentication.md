@@ -72,10 +72,21 @@ var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new Token
 |---|---|---|---|
 | authorize | `access_denied` | Discord サーバーのメンバーではない(未参加・退会済み) | ログインできないことを表示する |
 | authorize | `temporarily_unavailable` | Bot の準備ができていない | しばらくしてから再試行を案内する |
+| authorize | `access_denied` | Discord の同意画面で、利用者が拒否またはキャンセルした。description は「Discord での認可が拒否されました。」 | ログインが拒否されたことを表示する |
+| authorize | `temporarily_unavailable` | Discord 側が `temporarily_unavailable` を返した | しばらくしてから再試行を案内する |
+| authorize | `server_error` | Discord 側のそれ以外のエラー(`server_error`、`invalid_request`、不明なもの)。description は「Discord でのログインに失敗しました。」 | エラーを表示し、再試行できるようにする |
 | token(refresh) | `invalid_grant` | refresh token が無効・失効、またはメンバーでなくなった | 保存したトークンを捨て、再ログインさせる |
 | token(refresh) | `temporarily_unavailable` | Bot の準備ができていない | トークンは捨てず、後で再試行する |
 
 token エンドポイントのエラーは、`invalid_grant` も `temporarily_unavailable` も HTTP 400 で、body は `{"error":"...","error_description":"...","error_uri":"..."}`(JSON)。ステータスコードでは区別できないので、`error` を見ること。authorize のエラーは、クライアントのリダイレクト URI に `error` と `error_description` のクエリで返る。
+
+## Discord の同意画面で拒否・失敗したとき
+
+利用者が Discord の同意画面で拒否(またはキャンセル)すると、Discord は出勤台サーバーの `auth/callback` に `error=access_denied` 付きで戻る。出勤台サーバーはこれを、クライアントの `redirect_uri` への **`error=access_denied` と、クライアントが送った元の `state`** に変換して返す(`http://localhost:{port}/?error=access_denied&error_description=...&state=...&iss=...`)。クライアントは `state` を照合したうえで、`error` を見て表示すること。
+
+- 流れ: `connect/authorize` → Discord → `auth/callback`(失敗を検知し、ログイン途中の Cookie に失敗の印を付けて authorize へ 302)→ `connect/authorize`(印を見て Cookie を破棄し、OpenIddict がエラー応答を作ってクライアントへ 302)。`auth/callback` からクライアントの `redirect_uri` へ直接は戻らない(`state` を付けられず、open redirect にもなるため)。
+- Discord の error の写像は、`access_denied` → `access_denied`、`temporarily_unavailable` → `temporarily_unavailable`、それ以外はすべて `server_error`。
+- 戻り先が分からない場合(state が無い・壊れている・期限切れ=ログイン開始から時間が経った、サーバーを再起動した、など)は、クライアントには返せない。この場合はブラウザに「Discord でのログインを完了できませんでした。出勤台クライアントからやり直してください。」(HTTP 400、text/plain)が表示される。クライアントは、一定時間待っても `redirect_uri` に戻らなければ、タイムアウトとして扱うこと。
 
 ## Discord ログインについて
 
@@ -94,7 +105,6 @@ token エンドポイントのエラーは、`invalid_grant` も `temporarily_un
 ## 既知の制約
 
 - `prompt=none`・`prompt=login`・`max_age` には対応していない(毎回、Cookie の有無で動く)。
-- Discord の同意画面でユーザーが拒否した場合、クライアントのリダイレクト URI には何も返らない(クライアント側でタイムアウトにすること)。
 - Data Protection の鍵は永続化しない(上記のとおり、影響は10分のログイン途中 Cookie が無効になるだけ)。
 
 ## デプロイ時の人間の作業

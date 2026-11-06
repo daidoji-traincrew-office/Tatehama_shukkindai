@@ -59,18 +59,55 @@ public sealed class TestDiscordAuthenticationHandler(
 {
     public const string SchemeName = "TestDiscord";
     public const string UserIdHeader = "X-Test-Discord-Id";
+    public const string DenyHeader = "X-Test-Discord-Deny";
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
         Task.FromResult(AuthenticateResult.NoResult());
 
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
+        // 拒否の再現: 外部ログインには行かず、callback(テスト用 scheme)へ戻り先付きで飛ばす
+        if (Request.Headers.TryGetValue(DenyHeader, out var deny))
+        {
+            Response.Redirect("/auth/callback?state=fake&" + TestDiscordCallbackAuthenticationHandler.ErrorQuery + "=" +
+                              Uri.EscapeDataString(deny.ToString()) + "&" +
+                              TestDiscordCallbackAuthenticationHandler.RedirectQuery + "=" +
+                              Uri.EscapeDataString(properties.RedirectUri!));
+            return;
+        }
+
         var id = Request.Headers[UserIdHeader].ToString();
         var identity = new ClaimsIdentity("ExternalLogin");
         identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, id));
         await Context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity),
             properties);
         Response.Redirect(properties.RedirectUri!);
+    }
+}
+
+/// <summary>
+/// callback の Authenticate の代わり。OpenIddict 7.8 が Discord のエラー付きの戻りで返す失敗結果
+/// (Properties.RedirectUri = challenge 時の戻り先、Items[".error"] = Discord の error)を再現する。
+/// 戻り先の query が無い場合は、state token が検証できなかったときと同じく RedirectUri なしで失敗する。
+/// </summary>
+public sealed class TestDiscordCallbackAuthenticationHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    public const string SchemeName = "TestDiscordCallback";
+    public const string ErrorQuery = "error";
+    public const string RedirectQuery = "redirect";
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        var properties = new AuthenticationProperties();
+        if (Request.Query.TryGetValue(RedirectQuery, out var redirect))
+        {
+            properties.RedirectUri = redirect.ToString();
+        }
+
+        properties.Items[".error"] = Request.Query[ErrorQuery].ToString();
+        return Task.FromResult(AuthenticateResult.Fail("external login failed", properties));
     }
 }
 
@@ -112,8 +149,14 @@ public sealed class IdpFactory : WebApplicationFactory<Program>
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, TestDiscordAuthenticationHandler>(
                     TestDiscordAuthenticationHandler.SchemeName, _ => { });
+            services.AddAuthentication()
+                .AddScheme<AuthenticationSchemeOptions, TestDiscordCallbackAuthenticationHandler>(
+                    TestDiscordCallbackAuthenticationHandler.SchemeName, _ => { });
             services.Configure<ExternalLoginOptions>(o =>
-                o.ChallengeScheme = TestDiscordAuthenticationHandler.SchemeName);
+            {
+                o.ChallengeScheme = TestDiscordAuthenticationHandler.SchemeName;
+                o.CallbackScheme = TestDiscordCallbackAuthenticationHandler.SchemeName;
+            });
         });
     }
 

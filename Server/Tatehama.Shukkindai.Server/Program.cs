@@ -252,8 +252,12 @@ public class Program
                 options.AddSigningCertificate(signing);
             }
 
+            // EnableErrorPassthrough が無いと、Discord がエラー(access_denied など)付きで callback に戻ってきたとき、
+            // OpenIddict が自分でエラーを表示して終わり、AuthorizationController.DiscordCallback まで届かない
+            // (リダイレクトのリクエスト検証の段階で state とエラーを処理するため)。
             options.UseAspNetCore()
-                .EnableRedirectionEndpointPassthrough();
+                .EnableRedirectionEndpointPassthrough()
+                .EnableErrorPassthrough();
 
             options.UseSystemNetHttp()
                 .SetProductInformation(typeof(Program).Assembly);

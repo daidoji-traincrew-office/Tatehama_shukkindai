@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using OpenIddict.Abstractions;
@@ -521,5 +523,106 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
         using var cer = LoadCer();
         Assert.Equal("CN=Tatehama Shukkindai Server Signing Certificate", cer.Subject);
         Assert.Equal(pfx.GetPublicKey(), cer.GetPublicKey());
+    }
+
+    private static async Task<HttpResponseMessage> StartDeniedLoginAsync(HttpClient client, string discordError)
+    {
+        var (_, challenge) = NewPkce();
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            "connect/authorize?client_id=" + ClientId +
+            "&response_type=code&redirect_uri=" + Uri.EscapeDataString(RedirectUri) +
+            "&scope=offline_access&code_challenge=" + challenge + "&code_challenge_method=S256&state=denied-state");
+        request.Headers.Add(TestDiscordAuthenticationHandler.DenyHeader, discordError);
+        return await client.SendAsync(request, Ct); // → 外部ログインの代わりに callback へ
+    }
+
+    [Theory]
+    [InlineData("access_denied", "access_denied")]
+    [InlineData("temporarily_unavailable", "temporarily_unavailable")]
+    [InlineData("server_error", "server_error")]
+    [InlineData("invalid_request", "server_error")]
+    [InlineData("unknown_error", "server_error")]
+    public async Task DiscordConsentDenied_ReturnsErrorToClientRedirectUri_WithOriginalState(
+        string discordError, string expectedError)
+    {
+        using var client = _factory.CreateIdpClient();
+
+        // 1. authorize → 外部ログイン(拒否)→ callback
+        var toCallback = await StartDeniedLoginAsync(client, discordError);
+        Assert.True(toCallback.StatusCode == HttpStatusCode.Found, "step1: " + await toCallback.Content.ReadAsStringAsync(Ct));
+        Assert.StartsWith("/auth/callback", toCallback.Headers.Location!.OriginalString);
+
+        // 2. callback は失敗の印を Cookie に入れ、元の authorize の URL へ 302 で戻す(クライアントへは直接戻さない)
+        var callback = await client.GetAsync(toCallback.Headers.Location, Ct);
+        Assert.True(callback.StatusCode == HttpStatusCode.Found, "step2: " + await callback.Content.ReadAsStringAsync(Ct));
+        Assert.StartsWith("/connect/authorize?", callback.Headers.Location!.OriginalString);
+        Assert.Contains("__Host-Shukkindai.Login=", string.Join(";", callback.Headers.GetValues("Set-Cookie")));
+
+        // 3. authorize が Cookie の印を見て、クライアントの redirect_uri へエラーと元の state を返す
+        var authorize = await client.GetAsync(callback.Headers.Location, Ct);
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        var location = authorize.Headers.Location!;
+        Assert.StartsWith(RedirectUri, location.AbsoluteUri);
+        Assert.Equal(expectedError, QueryValue(location, "error"));
+        Assert.Equal("denied-state", QueryValue(location, "state"));
+        Assert.Null(System.Web.HttpUtility.ParseQueryString(location.Query)["code"]);
+        if (expectedError == "access_denied")
+        {
+            Assert.Contains("拒否", QueryValue(location, "error_description"));
+        }
+
+        // 4. 失敗の印は SignOut されていて、同じクライアントの次のログインに残らない
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "after-denied");
+        var token = await LoginAsync(client, id);
+        Assert.Equal(id.ToString(), DecodePart(token.AccessToken, 1).GetProperty("sub").GetString());
+    }
+
+    [Fact]
+    public async Task DiscordLoginFailure_WithoutReturnUri_ShowsReadableMessage_AndNoCookie()
+    {
+        // state token が検証できなかった場合など、戻り先が分からないときは、サーバー側でエラーを表示する
+        using var client = _factory.CreateIdpClient();
+
+        var response = await client.GetAsync("auth/callback?error=access_denied", Ct);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("text/plain; charset=utf-8", response.Content.Headers.ContentType!.ToString(), ignoreCase: true);
+        Assert.Contains("やり直してください", await response.Content.ReadAsStringAsync(Ct));
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+    }
+
+    [Fact]
+    public async Task DiscordLoginFailure_WithNonLocalReturnUri_IsNotFollowed()
+    {
+        // 戻り先が外部 URL なら、(state token 由来なので通常は起きないが)リダイレクトしない
+        using var client = _factory.CreateIdpClient();
+
+        var response = await client.GetAsync(
+            "auth/callback?error=access_denied&redirect=" + Uri.EscapeDataString("https://evil.example/"), Ct);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null(response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task RealCallbackScheme_ErrorFromDiscordWithInvalidState_ReachesControllerAsReadableMessage()
+    {
+        // テスト用 scheme に差し替えず、OpenIddict 本物の callback 処理を通す。
+        // EnableErrorPassthrough が無いと、OpenIddict 自身の "error:invalid_token" が表示されて終わる
+        using var factory = _factory.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+            services.Configure<ExternalLoginOptions>(o => o.CallbackScheme = OpenIddict.Client.WebIntegration.OpenIddictClientWebIntegrationConstants.Providers.Discord)));
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost/"),
+            AllowAutoRedirect = false,
+        });
+
+        var response = await client.GetAsync("auth/callback?error=access_denied&state=not-a-valid-state-token", Ct);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.Contains("やり直してください", body);
+        Assert.DoesNotContain("invalid_token", body);
     }
 }
