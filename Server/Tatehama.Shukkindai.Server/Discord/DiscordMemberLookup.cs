@@ -22,11 +22,34 @@ public sealed class DiscordMemberLookup : IDiscordMemberLookup
     {
         _settings = settings.Value;
         _logger = logger;
+        _client.Log += OnDiscordLog;
         _client.Ready += () =>
         {
             _readyReceived = true;
+            if (_client.GetGuild(_settings.GuildId) is null)
+            {
+                _logger.LogError(
+                    "Discord bot is ready but guild {GuildId} was not found. The bot is not in the guild, or Discord:GuildId is wrong.",
+                    _settings.GuildId);
+            }
+
             return Task.CompletedTask;
         };
+    }
+
+    private Task OnDiscordLog(LogMessage message)
+    {
+        var level = message.Severity switch
+        {
+            LogSeverity.Critical => LogLevel.Critical,
+            LogSeverity.Error => LogLevel.Error,
+            LogSeverity.Warning => LogLevel.Warning,
+            LogSeverity.Info => LogLevel.Information,
+            LogSeverity.Verbose => LogLevel.Debug,
+            _ => LogLevel.Trace,
+        };
+        _logger.Log(level, message.Exception, "Discord.Net [{Source}] {Message}", message.Source, message.Message);
+        return Task.CompletedTask;
     }
 
     public bool IsReady => _readyReceived && _client.GetGuild(_settings.GuildId) is not null;
@@ -50,7 +73,7 @@ public sealed class DiscordMemberLookup : IDiscordMemberLookup
         try
         {
             var user = await _client.Rest.GetGuildUserAsync(_settings.GuildId, discordUserId,
-                new RequestOptions { CancelToken = cancellationToken });
+                new RequestOptions { CancelToken = cancellationToken, Timeout = 5000 });
             return user is null
                 ? new MemberLookupResult(MemberLookupStatus.NotMember, null)
                 : new MemberLookupResult(MemberLookupStatus.Member, user.Username);
@@ -59,8 +82,9 @@ public sealed class DiscordMemberLookup : IDiscordMemberLookup
         {
             return new MemberLookupResult(MemberLookupStatus.NotMember, null);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e) when (!cancellationToken.IsCancellationRequested)
         {
+            // 呼び出し元のキャンセル以外(タイムアウトによる TaskCanceledException を含む)は Unavailable
             _logger.LogError(e, "Failed to look up Discord member. UserId: {UserId}", discordUserId);
             return new MemberLookupResult(MemberLookupStatus.Unavailable, null);
         }

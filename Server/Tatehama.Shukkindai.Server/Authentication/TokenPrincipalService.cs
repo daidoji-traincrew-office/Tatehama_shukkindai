@@ -37,15 +37,17 @@ public sealed class TokenPrincipalService(
                 return new TokenPrincipalResult.Rejected(Errors.TemporarilyUnavailable, UnavailableDescription);
         }
 
-        var username = result.Username!;
+        var username = result.Username
+                       ?? throw new InvalidOperationException("Member の結果には Username が必要です。");
         var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType,
             Claims.Name, Claims.Role);
         identity.AddClaim(new Claim(Claims.Subject, discordUserId.ToString()));
         identity.AddClaim(new Claim(Claims.Name, username));
 
         // offline_access 以外の scope は通さない
-        identity.SetScopes(requestedScopes.Intersect([Scopes.OfflineAccess], StringComparer.OrdinalIgnoreCase));
-        identity.SetDestinations(_ => [Destinations.AccessToken]);
+        // (大文字小文字を無視して比べ、正規の表記で返す)
+        identity.SetScopes(((string[])[Scopes.OfflineAccess]).Intersect(requestedScopes, StringComparer.OrdinalIgnoreCase));
+        TokenDestinations.Apply(identity);
 
         await observer.OnUserLoggedInAsync(discordUserId, username, cancellationToken);
         logger.LogInformation(
@@ -78,10 +80,9 @@ public sealed class TokenPrincipalService(
         // OpenIddict のサンプル(Velusia)と同じく、元の claim(scope を含む)を引き継ぐ
         var identity = new ClaimsIdentity(refreshTokenPrincipal.Claims,
             TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
-        identity.SetClaim(Claims.Name, result.Username);
-        // アクセストークンに載せるのは sub と name だけ
-        identity.SetDestinations(claim =>
-            claim.Type is Claims.Subject or Claims.Name ? [Destinations.AccessToken] : []);
+        identity.SetClaim(Claims.Name, result.Username
+                                       ?? throw new InvalidOperationException("Member の結果には Username が必要です。"));
+        TokenDestinations.Apply(identity);
 
         return new TokenPrincipalResult.Success(new ClaimsPrincipal(identity));
     }

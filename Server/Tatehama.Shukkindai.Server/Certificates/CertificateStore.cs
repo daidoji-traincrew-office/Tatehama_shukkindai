@@ -17,6 +17,14 @@ public static class CertificateStore
     public static readonly TimeSpan ExpirationWarningPeriod = TimeSpan.FromDays(30);
 
     public static string PfxPath(string directory, string name) => Path.Combine(directory, name + ".pfx");
+    /// <summary>このディレクトリで使う pfx のパス(権限の確認用)。</summary>
+    public static IEnumerable<string> PfxPaths(string directory) =>
+        new[]
+        {
+            ServerSigningCertificateName, ServerEncryptionCertificateName,
+            ClientSigningCertificateName, ClientEncryptionCertificateName,
+        }.Select(n => PfxPath(directory, n));
+
     public static string CerPath(string directory, string name) => Path.Combine(directory, name + ".cer");
 
     /// <summary>pfx が無ければ作る(RSA 2048、有効期限2年、パスワードなし)。作ったら true。</summary>
@@ -29,15 +37,59 @@ public static class CertificateStore
         }
 
         var directory = Path.GetDirectoryName(Path.GetFullPath(certificatePath))!;
-        Directory.CreateDirectory(directory);
+        CreateDirectory(directory);
 
         using var algorithm = RSA.Create(2048);
         var request = new CertificateRequest(new X500DistinguishedName(subjectName), algorithm,
             HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         request.CertificateExtensions.Add(new X509KeyUsageExtension(keyUsageFlags, true));
         using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(2));
-        File.WriteAllBytes(certificatePath, certificate.Export(X509ContentType.Pfx, string.Empty));
+        // 秘密鍵を含むので、Unix では所有者だけが読み書きできるようにして作る
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = PfxUnixMode;
+        }
+
+        using (var stream = new FileStream(certificatePath, options))
+        {
+            stream.Write(certificate.Export(X509ContentType.Pfx, string.Empty));
+        }
+
         return true;
+    }
+
+    public const UnixFileMode PfxUnixMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    public const UnixFileMode DirectoryUnixMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+
+    private static void CreateDirectory(string directory)
+    {
+        if (Directory.Exists(directory))
+        {
+            return;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(directory);
+        }
+        else
+        {
+            Directory.CreateDirectory(directory, DirectoryUnixMode);
+        }
+    }
+
+    /// <summary>Unix で、グループ・その他に権限が付いているか(0600 より緩いか)。</summary>
+    public static bool IsPermissionTooOpen(string path)
+    {
+        if (OperatingSystem.IsWindows() || !File.Exists(path))
+        {
+            return false;
+        }
+
+        const UnixFileMode loose = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                                   UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+        return (File.GetUnixFileMode(path) & loose) != UnixFileMode.None;
     }
 
     /// <summary>pfx を(無ければ作って)読み込む。</summary>
@@ -49,20 +101,31 @@ public static class CertificateStore
         return X509CertificateLoader.LoadPkcs12FromFile(path, string.Empty);
     }
 
-    /// <summary>サーバーの署名用証明書を読み込み、公開鍵だけの .cer(DER)が無ければ書き出す。</summary>
+    /// <summary>
+    /// サーバーの署名用証明書を読み込み、公開鍵だけの .cer(DER)を pfx から書き出す。
+    /// pfx を作り直したときに古い .cer が残らないよう、起動のたびに照合し、内容が違えば書き直す。
+    /// </summary>
     public static X509Certificate2 LoadServerSigningCertificate(string directory)
     {
         var certificate = LoadOrCreate(directory, ServerSigningCertificateName,
             "CN=Tatehama Shukkindai Server Signing Certificate", X509KeyUsageFlags.DigitalSignature);
         var cerPath = CerPath(directory, ServerSigningCertificateName);
-        if (!File.Exists(cerPath))
+        // X509ContentType.Cert は公開鍵だけの DER
+        var cerBytes = certificate.Export(X509ContentType.Cert);
+        if (!File.Exists(cerPath) || !File.ReadAllBytes(cerPath).AsSpan().SequenceEqual(cerBytes))
         {
-            // X509ContentType.Cert は公開鍵だけの DER
-            File.WriteAllBytes(cerPath, certificate.Export(X509ContentType.Cert));
+            File.WriteAllBytes(cerPath, cerBytes);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(cerPath, CerUnixMode);
+            }
         }
 
         return certificate;
     }
+
+    public const UnixFileMode CerUnixMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                                            UnixFileMode.GroupRead | UnixFileMode.OtherRead;
 
     public static X509Certificate2 LoadServerEncryptionCertificate(string directory) =>
         LoadOrCreate(directory, ServerEncryptionCertificateName,

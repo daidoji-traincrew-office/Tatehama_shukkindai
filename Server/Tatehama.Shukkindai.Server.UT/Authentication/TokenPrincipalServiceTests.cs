@@ -66,11 +66,12 @@ public class TokenPrincipalServiceTests
         SetLookup(MemberLookupStatus.Member, "alice");
 
         var result = await _service.CreateForAuthorizationAsync(UserId,
-            [Scopes.OpenId, Scopes.Profile, "OFFLINE_ACCESS", Scopes.OfflineAccess, "other"], "127.0.0.1",
+            [Scopes.OpenId, Scopes.Profile, "OFFLINE_ACCESS", "other"], "127.0.0.1",
             TestContext.Current.CancellationToken);
 
         var principal = Assert.IsType<TokenPrincipalResult.Success>(result).Principal;
-        Assert.Equal([Scopes.OfflineAccess], principal.GetScopes().Select(s => s.ToLowerInvariant()).Distinct());
+        // 大文字小文字違いで来ても、正規の表記(小文字)で1つだけ返る
+        Assert.Equal([Scopes.OfflineAccess], principal.GetScopes());
         Assert.DoesNotContain(principal.GetScopes(), s => s is Scopes.OpenId or Scopes.Profile or "other");
     }
 

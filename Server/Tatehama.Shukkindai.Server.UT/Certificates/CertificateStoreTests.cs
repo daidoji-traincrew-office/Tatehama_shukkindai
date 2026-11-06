@@ -63,6 +63,48 @@ public sealed class CertificateStoreTests : IDisposable
     }
 
     [Fact]
+    public void RecreatedPfx_RewritesStaleCer()
+    {
+        using var first = CertificateStore.LoadServerSigningCertificate(_directory);
+        var pfxPath = CertificateStore.PfxPath(_directory, CertificateStore.ServerSigningCertificateName);
+        var cerPath = CertificateStore.CerPath(_directory, CertificateStore.ServerSigningCertificateName);
+        var oldCer = File.ReadAllBytes(cerPath);
+
+        File.Delete(pfxPath);
+        using var second = CertificateStore.LoadServerSigningCertificate(_directory);
+
+        Assert.NotEqual(first.Thumbprint, second.Thumbprint);
+        var newCer = File.ReadAllBytes(cerPath);
+        Assert.NotEqual(oldCer, newCer);
+        using var cer = X509CertificateLoader.LoadCertificate(newCer);
+        Assert.Equal(second.Thumbprint, cer.Thumbprint);
+    }
+
+    [Fact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void UnixPermissions_PfxIs0600_DirectoryIs0700_CerIs0644()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix のファイルモードは Windows にない");
+        var directory = Path.Combine(_directory, "nested");
+
+        using var certificate = CertificateStore.LoadServerSigningCertificate(directory);
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(directory));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(
+            CertificateStore.PfxPath(directory, CertificateStore.ServerSigningCertificateName)));
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
+            File.GetUnixFileMode(CertificateStore.CerPath(directory, CertificateStore.ServerSigningCertificateName)));
+        Assert.False(CertificateStore.IsPermissionTooOpen(
+            CertificateStore.PfxPath(directory, CertificateStore.ServerSigningCertificateName)));
+
+        var pfx = CertificateStore.PfxPath(directory, CertificateStore.ServerSigningCertificateName);
+        File.SetUnixFileMode(pfx, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+        Assert.True(CertificateStore.IsPermissionTooOpen(pfx));
+    }
+
+    [Fact]
     public void WarnIfExpiring_WarnsOnlyForExpiredOrNearExpiry()
     {
         using var certificate = CertificateStore.LoadServerEncryptionCertificate(_directory);

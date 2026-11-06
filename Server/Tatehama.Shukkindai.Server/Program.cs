@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 using Tatehama.Shukkindai.Server.Authentication;
 using Tatehama.Shukkindai.Server.Certificates;
 using Tatehama.Shukkindai.Server.Configuration;
@@ -21,15 +22,11 @@ public class Program
         var builder = WebApplication.CreateBuilder(args);
         var isDevelopment = builder.Environment.IsDevelopment();
 
-        // issuer が不正なら、ここで例外にして起動を止める
-        var authenticationSettings = builder.Configuration.GetSection(AuthenticationSettings.SectionName)
-            .Get<AuthenticationSettings>() ?? new AuthenticationSettings();
-        var validation = new AuthenticationSettingsValidator().Validate(null, authenticationSettings);
-        if (validation.Failed)
-        {
-            throw new OptionsValidationException(Options.DefaultName, typeof(AuthenticationSettings),
-                validation.Failures);
-        }
+        // 設定が不正なら、ここで例外にして起動を止める
+        var authenticationSettings = BindAndValidate<AuthenticationSettings>(
+            builder, AuthenticationSettings.SectionName, new AuthenticationSettingsValidator());
+        var discordSettings = BindAndValidate<DiscordSettings>(
+            builder, DiscordSettings.SectionName, new DiscordSettingsValidator());
 
         ConfigureOptions(builder);
         ConfigureLogging(builder);
@@ -38,20 +35,26 @@ public class Program
         ConfigureAuthenticationServices(builder);
 
         var certificates = new List<(string, X509Certificate2)>();
+        var certificatePaths = CertificateStore.PfxPaths(authenticationSettings.CertificateDirectory).ToList();
         var openIddict = ConfigureOpenIddictServer(builder, authenticationSettings, isDevelopment, certificates);
-        ConfigureOpenIddictClient(builder, openIddict, authenticationSettings, isDevelopment, certificates);
+        ConfigureOpenIddictClient(openIddict, authenticationSettings, discordSettings, isDevelopment, certificates);
 
         builder.Services.AddControllers();
         builder.Services.AddSingleton<DiscordMemberLookup>();
         builder.Services.AddSingleton<IDiscordMemberLookup>(sp => sp.GetRequiredService<DiscordMemberLookup>());
         builder.Services.AddHostedService<DiscordBotHostedService>();
-        builder.Services.AddSingleton<IUserLoginObserver, NoOpUserLoginObserver>();
+        builder.Services.AddScoped<IUserLoginObserver, NoOpUserLoginObserver>();
         builder.Services.AddScoped<TokenPrincipalService>();
         builder.Services.AddScoped<ClientApplicationRegistrar>();
+        builder.Services.AddHostedService<TokenPruningService>();
 
         var app = builder.Build();
 
         CertificateStore.WarnIfExpiring(certificates, app.Logger, DateTimeOffset.UtcNow);
+        foreach (var path in certificatePaths.Where(CertificateStore.IsPermissionTooOpen))
+        {
+            app.Logger.LogWarning("Certificate file {Path} is readable by group/others. Use mode 0600.", path);
+        }
 
         if (!isDevelopment)
         {
@@ -92,6 +95,19 @@ public class Program
         await app.RunAsync();
     }
 
+    private static T BindAndValidate<T>(WebApplicationBuilder builder, string section, IValidateOptions<T> validator)
+        where T : class, new()
+    {
+        var settings = builder.Configuration.GetSection(section).Get<T>() ?? new T();
+        var result = validator.Validate(null, settings);
+        if (result.Failed)
+        {
+            throw new OptionsValidationException(Options.DefaultName, typeof(T), result.Failures);
+        }
+
+        return settings;
+    }
+
     private static void ConfigureOptions(WebApplicationBuilder builder)
     {
         builder.Services.AddSingleton<IValidateOptions<AuthenticationSettings>, AuthenticationSettingsValidator>();
@@ -102,7 +118,8 @@ public class Program
         builder.Services.AddOptions<DiscordSettings>()
             .Bind(builder.Configuration.GetSection(DiscordSettings.SectionName))
             .ValidateOnStart();
-        builder.Services.Configure<ExternalLoginOptions>(_ => { });
+        // IConfiguration には bind しない(本番で challenge scheme を差し替えられないようにする)
+        builder.Services.AddOptions<ExternalLoginOptions>();
     }
 
     private static void ConfigureLogging(WebApplicationBuilder builder)
@@ -142,7 +159,16 @@ public class Program
     {
         builder.Services
             .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options => options.ExpireTimeSpan = TimeSpan.FromMinutes(10));
+            .AddCookie(options =>
+            {
+                // Discord ログイン途中の Cookie。短命で、Secure・HttpOnly・__Host- プレフィックス付き
+                options.ExpireTimeSpan = TimeSpan.FromMinutes(10);
+                options.Cookie.Name = "__Host-Shukkindai.Login";
+                options.Cookie.Path = "/";
+                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = SameSiteMode.Lax;
+            });
         builder.Services.AddAuthorization();
     }
 
@@ -163,6 +189,14 @@ public class Program
                     .RequireProofKeyForCodeExchange();
 
                 options.SetIssuer(settings.IssuerUri);
+
+                // openid は使わない(identity token を発行しない)。discovery にも載せず、受け付けない。
+                // PKCE は S256 だけ(plain は拒否)。
+                options.Configure(o =>
+                {
+                    o.Scopes.Remove(Scopes.OpenId);
+                    o.CodeChallengeMethods.Remove(CodeChallengeMethods.Plain);
+                });
 
                 // アクセストークンは JWS(暗号化しない)。aud は付けない
                 options.DisableAccessTokenEncryption();
@@ -196,7 +230,7 @@ public class Program
     }
 
     private static void ConfigureOpenIddictClient(
-        WebApplicationBuilder builder, OpenIddictBuilder openIddict, AuthenticationSettings settings,
+        OpenIddictBuilder openIddict, AuthenticationSettings settings, DiscordSettings discordSettings,
         bool isDevelopment, List<(string, X509Certificate2)> certificates)
     {
         openIddict.AddClient(options =>
@@ -227,15 +261,15 @@ public class Program
             options.UseWebProviders()
                 .AddDiscord(discord =>
                 {
-                    // ギルドの確認は Bot で行うので、identify だけでよい
+                    // ギルドの確認は Bot で行うので、要求する scope は identify だけでよい。
+                    // (OpenIddict 7.8 の WebIntegration が openid も足すため、実際には "openid identify" を要求する)
                     discord.AddScopes("identify");
                     discord
-                        .SetClientId(builder.Configuration["Discord:ClientId"] ?? "")
-                        .SetClientSecret(builder.Configuration["Discord:ClientSecret"] ?? "")
+                        .SetClientId(discordSettings.ClientId!)
+                        .SetClientSecret(discordSettings.ClientSecret!)
                         .SetRedirectUri("auth/callback");
                 });
 
-            options.AddDiscordIssuerParameterSupport();
         });
     }
 }

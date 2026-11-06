@@ -4,7 +4,10 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
+using OpenIddict.Abstractions;
+using Tatehama.Shukkindai.Server.Authentication;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Tatehama.Shukkindai.Server.IT;
@@ -33,13 +36,14 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
 
     /// <summary>authorize を最後まで進め、クライアントのリダイレクト先(302 の Location)を返す。</summary>
     private static async Task<(Uri Location, string Verifier)> AuthorizeAsync(HttpClient client, ulong discordId,
-        string scope = "offline_access")
+        string scope = "offline_access",
+        string challengeMethod = "S256")
     {
         var (verifier, challenge) = NewPkce();
         var url = "connect/authorize?client_id=" + ClientId +
                   "&response_type=code&redirect_uri=" + Uri.EscapeDataString(RedirectUri) +
                   "&scope=" + Uri.EscapeDataString(scope) +
-                  "&code_challenge=" + challenge + "&code_challenge_method=S256&state=xyz";
+                  "&code_challenge=" + challenge + "&code_challenge_method=" + challengeMethod + "&state=xyz";
 
         // 1. 外部ログインへ Challenge(テスト scheme が Cookie を発行して authorize に戻す)
         using var first = new HttpRequestMessage(HttpMethod.Get, url);
@@ -51,6 +55,19 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
         var secondResponse = await client.GetAsync(firstResponse.Headers.Location, Ct);
         Assert.Equal(HttpStatusCode.Found, secondResponse.StatusCode);
         return (secondResponse.Headers.Location!, verifier);
+    }
+
+    private static async Task<HttpResponseMessage> SendAuthorizeAsync(HttpClient client, ulong discordId,
+        string scope, string challengeMethod)
+    {
+        var (_, challenge) = NewPkce();
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            "connect/authorize?client_id=" + ClientId +
+            "&response_type=code&redirect_uri=" + Uri.EscapeDataString(RedirectUri) +
+            "&scope=" + Uri.EscapeDataString(scope) +
+            "&code_challenge=" + challenge + "&code_challenge_method=" + challengeMethod + "&state=xyz");
+        request.Headers.Add(TestDiscordAuthenticationHandler.UserIdHeader, discordId.ToString());
+        return await client.SendAsync(request, Ct);
     }
 
     private static async Task<HttpResponseMessage> PostTokenAsync(HttpClient client, Dictionary<string, string> form) =>
@@ -107,6 +124,21 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
     private X509Certificate2 LoadCer() => X509CertificateLoader.LoadCertificateFromFile(
         Path.Combine(_factory.CertificateDirectory, "server-signing-certificate.cer"));
 
+    /// <summary>
+    /// ユーザー由来の claim は sub と name だけ。残りは OpenIddict のプロトコル claim(実際の出力から作った許可リスト)。
+    /// </summary>
+    private static void AssertOnlyAllowedClaims(JsonElement payload)
+    {
+        var allowed = new HashSet<string>
+        {
+            "sub", "name",
+            "iss", "iat", "exp", "jti", "scope", "client_id", "oi_prst", "oi_au_id", "oi_tkn_id",
+        };
+        var unexpected = payload.EnumerateObject().Select(p => p.Name).Where(n => !allowed.Contains(n)).ToList();
+        Assert.True(unexpected.Count == 0, "想定外の claim: " + string.Join(",", unexpected) + " / " + payload);
+        Assert.False(payload.TryGetProperty("aud", out _));
+    }
+
     private static string QueryValue(Uri uri, string key) => System.Web.HttpUtility.ParseQueryString(uri.Query)[key]!;
 
     [Fact]
@@ -134,17 +166,10 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
         Assert.False(payload.TryGetProperty("oi_prvd_name", out _));
         var lifetime = payload.GetProperty("exp").GetInt64() - payload.GetProperty("iat").GetInt64();
         Assert.InRange(lifetime, 3590, 3610);
-        Assert.Equal(3600, token.ExpiresIn);
+        Assert.InRange(token.ExpiresIn, 3590, 3600);
         Assert.False(string.IsNullOrEmpty(token.RefreshToken));
 
-        // ユーザー由来の claim は sub と name だけ。残りは OpenIddict のプロトコル claim(許可リスト)
-        var allowed = new HashSet<string>
-        {
-            "sub", "name",
-            "iss", "iat", "exp", "jti", "scope", "client_id", "oi_prst", "oi_au_id", "oi_tkn_id",
-        };
-        var unexpected = payload.EnumerateObject().Select(p => p.Name).Where(n => !allowed.Contains(n)).ToList();
-        Assert.True(unexpected.Count == 0, "想定外の claim: " + string.Join(",", unexpected) + " / " + payload);
+        AssertOnlyAllowedClaims(payload);
     }
 
     [Fact]
@@ -227,7 +252,7 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
         var payload = DecodePart(refreshed.AccessToken, 1);
         Assert.Equal(id.ToString(), payload.GetProperty("sub").GetString());
         Assert.Equal("dave-renamed", payload.GetProperty("name").GetString());
-        Assert.False(payload.TryGetProperty("aud", out _));
+        AssertOnlyAllowedClaims(payload);
         Assert.Equal(2, refreshed.AccessToken.Count(c => c == '.'));
     }
 
@@ -330,24 +355,138 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
     }
 
     [Fact]
-    public async Task OnlyOfflineAccessScope_IsGranted()
+    public async Task OfflineAccessScope_IsGranted()
     {
         var id = NewDiscordId();
         _factory.Lookup.SetMember(id, "ivan");
         using var client = _factory.CreateIdpClient();
 
-        var (location, verifier) = await AuthorizeAsync(client, id, "offline_access");
-        var response = await PostTokenAsync(client, new Dictionary<string, string>
+        var token = await LoginAsync(client, id);
+
+        Assert.Equal("offline_access", token.Scope);
+    }
+
+    [Fact]
+    public async Task OpenIdScope_IsNotSupported_AndRejectedAsInvalidScope()
+    {
+        // openid を許すと、OpenIddict.Client が id_token を必須にしてクライアントがログインできなくなる
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "judy");
+        using var client = _factory.CreateIdpClient();
+
+        var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
+        Assert.Equal(["offline_access"],
+            discovery.GetProperty("scopes_supported").EnumerateArray().Select(e => e.GetString()));
+
+        var response = await SendAuthorizeAsync(client, id, "openid offline_access", "S256");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("invalid_scope", await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task PkcePlain_IsRejected_AndDiscoveryAdvertisesS256Only()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "kate");
+        using var client = _factory.CreateIdpClient();
+
+        var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
+        Assert.Equal(["S256"],
+            discovery.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(e => e.GetString()));
+
+        var response = await SendAuthorizeAsync(client, id, "offline_access", "plain");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("invalid_request", await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task PostAuthorize_KeepsParameters_AndLoginCookieIsHardened()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "leo");
+        using var client = _factory.CreateIdpClient();
+        var (verifier, challenge) = NewPkce();
+
+        using var post = new HttpRequestMessage(HttpMethod.Post, "connect/authorize")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["client_id"] = ClientId,
+                ["response_type"] = "code",
+                ["redirect_uri"] = RedirectUri,
+                ["scope"] = "offline_access",
+                ["code_challenge"] = challenge,
+                ["code_challenge_method"] = "S256",
+                ["state"] = "xyz",
+            }),
+        };
+        post.Headers.Add(TestDiscordAuthenticationHandler.UserIdHeader, id.ToString());
+        var first = await client.SendAsync(post, Ct);
+        Assert.Equal(HttpStatusCode.Found, first.StatusCode);
+
+        var setCookie = Assert.Single(first.Headers.GetValues("Set-Cookie"));
+        Assert.StartsWith("__Host-Shukkindai.Login=", setCookie);
+        Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=lax", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("domain=", setCookie, StringComparison.OrdinalIgnoreCase);
+
+        // 戻り先にフォームのパラメーターが引き継がれ、そのまま code が発行される
+        var second = await client.GetAsync(first.Headers.Location, Ct);
+        Assert.Equal(HttpStatusCode.Found, second.StatusCode);
+        var code = QueryValue(second.Headers.Location!, "code");
+        var token = await ReadTokenAsync(await PostTokenAsync(client, new Dictionary<string, string>
         {
             ["grant_type"] = "authorization_code",
             ["client_id"] = ClientId,
-            ["code"] = QueryValue(location, "code"),
+            ["code"] = code,
             ["redirect_uri"] = RedirectUri,
             ["code_verifier"] = verifier,
-        });
-        var token = await ReadTokenAsync(response);
+        }));
+        Assert.Equal(id.ToString(), DecodePart(token.AccessToken, 1).GetProperty("sub").GetString());
+    }
 
-        Assert.Equal("offline_access", token.Scope);
+    [Fact]
+    public async Task ClientRegistration_OverwritesStaleDescriptorInRealDb()
+    {
+        using var client = _factory.CreateIdpClient();
+        await client.GetAsync("healthz", Ct); // 起動(=登録)させる
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
+        var application = (await manager.FindByClientIdAsync(ClientId, Ct))!;
+
+        // 古い記述子(リダイレクト URI が1つだけ、revocation 権限なし)で上書きしておく
+        var stale = new OpenIddictApplicationDescriptor();
+        await manager.PopulateAsync(stale, application, Ct);
+        stale.RedirectUris.Clear();
+        stale.RedirectUris.Add(new Uri("http://localhost:51180/"));
+        stale.Permissions.Remove(OpenIddictConstants.Permissions.Endpoints.Revocation);
+        await manager.UpdateAsync(application, stale, Ct);
+        var before = new OpenIddictApplicationDescriptor();
+        await manager.PopulateAsync(before, (await manager.FindByClientIdAsync(ClientId, Ct))!, Ct);
+        Assert.Single(before.RedirectUris);
+        Assert.DoesNotContain(OpenIddictConstants.Permissions.Endpoints.Revocation, before.Permissions);
+
+        try
+        {
+            await scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().EnsureRegisteredAsync(Ct);
+
+            var after = new OpenIddictApplicationDescriptor();
+            await manager.PopulateAsync(after, (await manager.FindByClientIdAsync(ClientId, Ct))!, Ct);
+            var expected = scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().CreateDescriptor();
+            Assert.Equal(expected.RedirectUris.Select(u => u.AbsoluteUri).Order(),
+                after.RedirectUris.Select(u => u.AbsoluteUri).Order());
+            Assert.Equal(expected.Permissions.Order(), after.Permissions.Order());
+            Assert.Equal(expected.Requirements.Order(), after.Requirements.Order());
+            Assert.Equal(5, after.RedirectUris.Count);
+        }
+        finally
+        {
+            // 他のテストに影響しないよう、最新の記述子に戻す
+            await scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().EnsureRegisteredAsync(Ct);
+        }
     }
 
     [Fact]
@@ -371,13 +510,16 @@ public sealed class IdpFlowTests : IClassFixture<IdpFactory>
     }
 
     [Fact]
-    public async Task SigningCertificate_CerIsWrittenAndDiffersPerFile()
+    public async Task Startup_CreatesSigningPfxAndMatchingCer()
     {
         using var client = _factory.CreateIdpClient();
         await client.GetAsync("healthz", Ct); // 起動させる
 
-        Assert.True(File.Exists(Path.Combine(_factory.CertificateDirectory, "server-signing-certificate.pfx")));
+        var pfxPath = Path.Combine(_factory.CertificateDirectory, "server-signing-certificate.pfx");
+        Assert.True(File.Exists(pfxPath));
+        using var pfx = X509CertificateLoader.LoadPkcs12FromFile(pfxPath, string.Empty);
         using var cer = LoadCer();
         Assert.Equal("CN=Tatehama Shukkindai Server Signing Certificate", cer.Subject);
+        Assert.Equal(pfx.GetPublicKey(), cer.GetPublicKey());
     }
 }

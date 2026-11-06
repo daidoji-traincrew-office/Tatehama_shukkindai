@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Hosting;
-using Moq;
 using Tatehama.Shukkindai.Server.Configuration;
 
 namespace Tatehama.Shukkindai.Server.UT.Configuration;
@@ -24,6 +22,7 @@ public class SettingsValidatorTests
     [InlineData("   ")]
     [InlineData("/relative/")]
     [InlineData("tatehama.example/")]
+    [InlineData("http://example.test/")]
     [InlineData("https://example.test")]
     [InlineData("https://example.test/path")]
     public void InvalidIssuer_Fails(string? issuer)
@@ -41,26 +40,22 @@ public class SettingsValidatorTests
         Assert.False(IsValid(settings));
     }
 
-    [Theory]
-    [InlineData("Development", true)]
-    [InlineData("Production", false)]
-    public void Discord_RequiredOutsideDevelopment(string environmentName, bool expected)
+    [Fact]
+    public void Discord_AllRequired_EvenInDevelopment()
     {
-        var environment = new Mock<IHostEnvironment>();
-        environment.SetupGet(e => e.EnvironmentName).Returns(environmentName);
+        var result = new DiscordSettingsValidator().Validate(null, new DiscordSettings());
 
-        var result = new DiscordSettingsValidator(environment.Object).Validate(null, new DiscordSettings());
-
-        Assert.Equal(expected, result.Succeeded);
+        Assert.True(result.Failed);
+        Assert.Contains("Discord:BotToken は必須です。", result.Failures!);
+        Assert.Contains("Discord:ClientId は必須です。", result.Failures!);
+        Assert.Contains("Discord:ClientSecret は必須です。", result.Failures!);
+        Assert.Contains(result.Failures!, f => f.StartsWith("Discord:GuildId"));
     }
 
     [Fact]
-    public void Discord_AllSet_SucceedsInProduction()
+    public void Discord_AllSet_Succeeds()
     {
-        var environment = new Mock<IHostEnvironment>();
-        environment.SetupGet(e => e.EnvironmentName).Returns("Production");
-
-        var result = new DiscordSettingsValidator(environment.Object).Validate(null, new DiscordSettings
+        var result = new DiscordSettingsValidator().Validate(null, new DiscordSettings
         {
             ClientId = "a", ClientSecret = "b", BotToken = "c", GuildId = 1,
         });

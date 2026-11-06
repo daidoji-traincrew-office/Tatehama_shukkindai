@@ -85,25 +85,19 @@ public sealed class IdpFactory : WebApplicationFactory<Program>
 
     public FakeDiscordMemberLookup Lookup { get; } = new();
 
-    public IdpFactory()
-    {
-        // Program は builder.Configuration を早い段階で読むので、環境変数で渡す
-        // (WebApplicationFactory の ConfigureAppConfiguration では間に合わない)
-        Environment.SetEnvironmentVariable("Authentication__Issuer", Issuer);
-        Environment.SetEnvironmentVariable("Authentication__CertificateDirectory", CertificateDirectory);
-        Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", ConnectionString);
-        Environment.SetEnvironmentVariable("Logging__LogLevel__Microsoft.EntityFrameworkCore", "Warning");
-        Environment.SetEnvironmentVariable("Logging__LogLevel__OpenIddict", "Warning");
-        Environment.SetEnvironmentVariable("Discord__ClientId", "dummy-client-id");
-        Environment.SetEnvironmentVariable("Discord__ClientSecret", "dummy-client-secret");
-        Environment.SetEnvironmentVariable("Discord__BotToken", "dummy-bot-token");
-        Environment.SetEnvironmentVariable("Discord__GuildId", "1");
-    }
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Development 以外にして、本番と同じファイル証明書の経路(.cer の書き出しを含む)を通す
         builder.UseEnvironment("IntegrationTest");
+        // Program は builder.Configuration を早い段階で読む。環境変数でプロセス全体を汚さないよう UseSetting で渡す
+        builder.UseSetting("Authentication:Issuer", Issuer);
+        builder.UseSetting("Authentication:CertificateDirectory", CertificateDirectory);
+        builder.UseSetting("ConnectionStrings:DefaultConnection", ConnectionString);
+        builder.UseSetting("Logging:LogLevel:Microsoft.EntityFrameworkCore", "Warning");
+        builder.UseSetting("Discord:ClientId", "dummy-client-id");
+        builder.UseSetting("Discord:ClientSecret", "dummy-client-secret");
+        builder.UseSetting("Discord:BotToken", "dummy-bot-token");
+        builder.UseSetting("Discord:GuildId", "1");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<DiscordBotHostedService>();

@@ -2,7 +2,6 @@ using Microsoft.AspNetCore;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
@@ -26,7 +25,12 @@ public class AuthorizationController(
             .Principal;
         if (principal is null)
         {
-            var properties = new AuthenticationProperties { RedirectUri = HttpContext.Request.GetEncodedUrl() };
+            // POST の場合も、フォームのパラメーターを失わないように戻り先を組み立てる(OpenIddict のサンプルと同じ)
+            var parameters = Request.HasFormContentType ? Request.Form.ToList() : Request.Query.ToList();
+            var properties = new AuthenticationProperties
+            {
+                RedirectUri = Request.PathBase + Request.Path + QueryString.Create(parameters),
+            };
             return Results.Challenge(properties, [externalLoginOptions.Value.ChallengeScheme]);
         }
 
@@ -101,10 +105,8 @@ public class AuthorizationController(
         var identity = new ClaimsIdentity("ExternalLogin");
         identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, userId));
 
-        var properties = new AuthenticationProperties(result.Properties.Items)
-        {
-            RedirectUri = result.Properties.RedirectUri ?? "/",
-        };
+        // Discord のトークンなどを Cookie に持ち回らない。戻り先だけ引き継ぐ
+        var properties = new AuthenticationProperties { RedirectUri = result.Properties.RedirectUri ?? "/" };
         return Results.SignIn(new ClaimsPrincipal(identity), properties,
             CookieAuthenticationDefaults.AuthenticationScheme);
     }
