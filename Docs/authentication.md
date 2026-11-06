@@ -58,11 +58,13 @@ var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new Token
 ## クライアント登録
 
 - `client_id`: `Tatehama_Shukkindai_Client`(public client、native)。client secret は無い。
-- PKCE(S256)が必須。
+- PKCE は S256 が必須。`plain` は拒否される(`code_challenge_method=plain` は `invalid_request`、HTTP 400)。discovery の `code_challenge_methods_supported` も `S256` だけ。
 - リダイレクト URI: `http://localhost:{port}/`。ポートは設定 `Authentication:ClientRedirectPorts`(既定は 51180〜51184)。
-- scope: `offline_access`(これ以外の scope は通らない)。
+- scope: `offline_access` だけ。`openid` は宣言(discovery の `scopes_supported`)にも受付にも含めない。`scope=openid offline_access` で authorize すると `invalid_scope`(HTTP 400。リダイレクトされず、サーバーのエラー応答になる)。OpenIddict.Client は `scopes_supported` に `openid` があると自動で付けて id_token を必須にするので、宣言から外してある。identity token は発行しない。
 - エンドポイント: `{issuer}connect/authorize`、`{issuer}connect/token`、`{issuer}connect/revoke`。
-- refresh token の寿命は7日で、使うたびに新しいものが返る(rolling)。**必ず保存し直すこと。** 古いものは使えなくなる場合がある。
+- refresh token の寿命は7日で、使うたびに新しいものが返る(rolling、有効期限も延びる)。**必ず保存し直すこと。**
+- 使用済みの refresh token の再使用は、OpenIddict 既定の猶予(30秒)までしか許されない。猶予を過ぎて再使用すると、不正な再利用とみなされ、同じ authorization のトークンが連鎖して失効しうる(OpenIddict の挙動。この実装では変更していない)。更新結果を保存する前にクラッシュした場合などに備え、更新と保存は1か所で直列に行うこと。
+- **refresh は出勤台クライアントだけが行う。** 他のアプリ(ATS など)には、アクセストークンだけを渡すこと(refresh token は渡さない)。
 
 ## エラー
 
@@ -75,9 +77,32 @@ var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new Token
 
 token エンドポイントのエラーは、`invalid_grant` も `temporarily_unavailable` も HTTP 400 で、body は `{"error":"...","error_description":"...","error_uri":"..."}`(JSON)。ステータスコードでは区別できないので、`error` を見ること。authorize のエラーは、クライアントのリダイレクト URI に `error` と `error_description` のクエリで返る。
 
+## Discord ログインについて
+
+- Discord へのログインは、OpenIddict.Client の Discord プロバイダーで行う。OpenIddict 7.8.0 のプロバイダーは静的設定を持たず、Discord 自身の discovery(`https://discord.com/.well-known/openid-configuration`)を読む。Discord は discovery で `authorization_response_iss_parameter_supported: true` を宣言しているので、Crew(OpenIddict 5.x)で必要だった「redirect の `iss` パラメーターの回避ハンドラ」は **7.8.0 では不要になった**ため、この実装には入れていない(`DiscordRegistrationTests` が前提を固定している)。
+- 要求される Discord の scope は、実際には `openid identify`(7.8 の WebIntegration が `openid` を足す)。メンバー確認は Bot が行うので、ユーザーの Discord トークンは使わず、Cookie にも持ち回らない。
+
+## 運用上の注意
+
+- `/healthz` は readiness 用(DB 接続と Bot の Ready を見る)。Discord 側の障害で 503 になりうるので、liveness には使わない。
+- 証明書の有効期限が切れると、OpenIddict が拒否するため IdP は起動しなくなる。2年の期限の前に更新が要る(30日前から起動時に Warning ログを出す)。
+- `cert/` の pfx(秘密鍵を含む)は、Unix では 0600、ディレクトリは 0700 で作る。権限が緩いと起動時に Warning を出す。
+- `.cer` は起動のたびに、署名用 pfx と照合して必要なら書き直す。
+- 期限切れのトークンと、使われなくなった authorization は、6時間ごとに(14日より古いものを)削除する。
+- ログイン途中の Cookie(`__Host-Shukkindai.Login`、Secure・HttpOnly・SameSite=Lax、10分)は、Data Protection の鍵を永続化していないので、再起動すると無効になる(ログインをやり直すだけ)。
+
+## 既知の制約
+
+- `prompt=none`・`prompt=login`・`max_age` には対応していない(毎回、Cookie の有無で動く)。
+- Discord の同意画面でユーザーが拒否した場合、クライアントのリダイレクト URI には何も返らない(クライアント側でタイムアウトにすること)。
+- Data Protection の鍵は永続化しない(上記のとおり、影響は10分のログイン途中 Cookie が無効になるだけ)。
+
 ## デプロイ時の人間の作業
 
 - Discord アプリのリダイレクト URI に `{issuer}auth/callback` を追加する。
-- `cert/` を永続化する(署名・暗号化の証明書と `.cer` が入る。コンテナ作り直しで消えると、全トークンが無効になる)。
-- リバースプロキシの IP を設定 `ProxyIP` に入れる。
-- `Discord:ClientId`・`Discord:ClientSecret`・`Discord:BotToken`・`Discord:GuildId` を環境変数で渡す。
+- Discord Developer Portal で、Bot の **Server Members Intent** を有効にする。Bot を対象のギルドに招待する(`Discord:GuildId` と一致させる。Bot がギルドにいないと Ready 後に Error ログが出て、認証は常に `temporarily_unavailable` になる)。
+- DB に、`Server/Database/migrations/` を `atlas migrate apply` で適用する。
+- `cert/` を永続化する(署名・暗号化の証明書と `.cer` が入る。コンテナ作り直しで消えると、全トークンが無効になる)。コンテナのユーザーが書き込めること、権限が 0600 / 0700 であること。
+- リバースプロキシの IP を設定 `ProxyIP` に入れる。リバースプロキシは `X-Forwarded-Host` / `X-Forwarded-Proto` を、クライアントから来た値を素通しせず、自分で上書きすること(エンドポイントの URL とリダイレクト URI の組み立てに使われる)。
+- `Discord:ClientId`・`Discord:ClientSecret`・`Discord:BotToken`・`Discord:GuildId` を環境変数で渡す(全環境で必須。未設定だと起動時に例外)。
+- dev サーバーも `ASPNETCORE_ENVIRONMENT=Development` では動かさない(開発用の証明書になり、ForwardedHeaders も無効になる)。
