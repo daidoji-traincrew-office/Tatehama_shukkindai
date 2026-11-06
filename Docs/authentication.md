@@ -11,6 +11,7 @@
 
 - discovery: `{issuer}.well-known/openid-configuration`
 - JWKS: `{issuer}.well-known/jwks`(discovery の `jwks_uri` を参照)
+- discovery の `issuer` は設定値で固定だが、各エンドポイントの URL はリクエストの host から組み立てられる。リバースプロキシが `X-Forwarded-Host` / `X-Forwarded-Proto` を正しく渡す必要がある。
 - **検証側の受け入れ範囲**
   - prod が発行したトークン: MultiATS と Rendo の dev・prod の両方で通す。
   - dev が発行したトークン: 出勤台 dev だけで通す。
@@ -19,14 +20,21 @@
 ## アクセストークン
 
 - JWS(暗号化しない)。署名は RS256。
-- header: `alg` = `RS256`、`typ` = `at+jwt`、`kid` = 署名鍵の識別子(JWKS の `kid` と一致する)。
+- header: `alg` = `RS256`、`typ` = `at+jwt`、`kid` と `x5t` = 署名証明書の識別子(JWKS の `kid` と一致する)。
 - 寿命は1時間(`exp - iat` = 3600秒)。
 - ユーザー由来の claim は次の2つだけ。ロール・社員番号・登録 ID などは入らない。
   - **`sub`: Discord ユーザー ID(10進数の文字列)。ulong に変換して使うこと。**
   - `name`: Discord の**ユーザー名**。サーバー内のニックネームや表示名(グローバル名)ではない。出勤台で表示する名前とも別。
-- OpenIddict が付けるプロトコル claim: (実装後に追記)
+- そのほかに OpenIddict が付けるプロトコル claim: `iss`(issuer)、`iat`、`exp`、`jti`、`scope`(`offline_access`)、`client_id`、`oi_prst`、`oi_au_id`、`oi_tkn_id`。`nbf` と `aud` は付かない。`oi_*` は OpenIddict 内部用なので、検証側は使わないこと。
 
-実際のトークンの例は、実装後に追記する。
+実際のトークンの例(テストで発行したもの。値はダミー):
+
+```json
+// header
+{"alg":"RS256","kid":"7FFB4FBA9B318B82E6DDD5FF825090BD05FDF3D6","x5t":"f_tPupsxi4Lm3dX_glCQvQX989Y","typ":"at+jwt"}
+// payload
+{"iss":"https://tatehama-shukkindai-test.example/","exp":1793956743,"iat":1793953143,"scope":"offline_access","jti":"d2c47065-49bf-4e5a-9189-fe983a611fa8","sub":"900000000000740692","name":"alice","oi_prst":"Tatehama_Shukkindai_Client","oi_au_id":"51dd6aa6-6a8a-4331-8de3-b9b5cc8aec91","client_id":"Tatehama_Shukkindai_Client","oi_tkn_id":"18bad90a-cfaa-430d-a215-ca5826d89bed"}
+```
 
 ## 署名公開鍵の受け取り方
 
@@ -65,7 +73,7 @@ var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new Token
 | token(refresh) | `invalid_grant` | refresh token が無効・失効、またはメンバーでなくなった | 保存したトークンを捨て、再ログインさせる |
 | token(refresh) | `temporarily_unavailable` | Bot の準備ができていない | トークンは捨てず、後で再試行する |
 
-(token エンドポイントが `temporarily_unavailable` を返すときのステータスコードは、実装後に追記)
+token エンドポイントのエラーは、`invalid_grant` も `temporarily_unavailable` も HTTP 400 で、body は `{"error":"...","error_description":"...","error_uri":"..."}`(JSON)。ステータスコードでは区別できないので、`error` を見ること。authorize のエラーは、クライアントのリダイレクト URI に `error` と `error_description` のクエリで返る。
 
 ## デプロイ時の人間の作業
 

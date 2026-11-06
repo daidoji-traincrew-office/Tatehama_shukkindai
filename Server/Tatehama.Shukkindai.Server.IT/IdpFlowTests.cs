@@ -1,0 +1,383 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.Json;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
+
+namespace Tatehama.Shukkindai.Server.IT;
+
+public sealed class IdpFlowTests : IClassFixture<IdpFactory>
+{
+    private const string ClientId = "Tatehama_Shukkindai_Client";
+    private const string RedirectUri = "http://localhost:51180/";
+    private static long _idCounter = 900_000_000_000_000_000L + Random.Shared.NextInt64(1_000_000);
+
+    private readonly IdpFactory _factory;
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    public IdpFlowTests(IdpFactory factory) => _factory = factory;
+
+    private static ulong NewDiscordId() => (ulong)Interlocked.Increment(ref _idCounter);
+
+    private sealed record TokenResponse(string AccessToken, string? RefreshToken, int ExpiresIn, string? Scope);
+
+    private static (string Verifier, string Challenge) NewPkce()
+    {
+        var verifier = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+        var challenge = Base64UrlEncoder.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+        return (verifier, challenge);
+    }
+
+    /// <summary>authorize を最後まで進め、クライアントのリダイレクト先(302 の Location)を返す。</summary>
+    private static async Task<(Uri Location, string Verifier)> AuthorizeAsync(HttpClient client, ulong discordId,
+        string scope = "offline_access")
+    {
+        var (verifier, challenge) = NewPkce();
+        var url = "connect/authorize?client_id=" + ClientId +
+                  "&response_type=code&redirect_uri=" + Uri.EscapeDataString(RedirectUri) +
+                  "&scope=" + Uri.EscapeDataString(scope) +
+                  "&code_challenge=" + challenge + "&code_challenge_method=S256&state=xyz";
+
+        // 1. 外部ログインへ Challenge(テスト scheme が Cookie を発行して authorize に戻す)
+        using var first = new HttpRequestMessage(HttpMethod.Get, url);
+        first.Headers.Add(TestDiscordAuthenticationHandler.UserIdHeader, discordId.ToString());
+        var firstResponse = await client.SendAsync(first, Ct);
+        Assert.Equal(HttpStatusCode.Found, firstResponse.StatusCode);
+
+        // 2. authorize に戻る → クライアントへ 302
+        var secondResponse = await client.GetAsync(firstResponse.Headers.Location, Ct);
+        Assert.Equal(HttpStatusCode.Found, secondResponse.StatusCode);
+        return (secondResponse.Headers.Location!, verifier);
+    }
+
+    private static async Task<HttpResponseMessage> PostTokenAsync(HttpClient client, Dictionary<string, string> form) =>
+        await client.PostAsync("connect/token", new FormUrlEncodedContent(form), Ct);
+
+    private static async Task<TokenResponse> ReadTokenAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+        return new TokenResponse(
+            root.GetProperty("access_token").GetString()!,
+            root.TryGetProperty("refresh_token", out var r) ? r.GetString() : null,
+            root.GetProperty("expires_in").GetInt32(),
+            root.TryGetProperty("scope", out var s) ? s.GetString() : null);
+    }
+
+    private static async Task<TokenResponse> LoginAsync(HttpClient client, ulong discordId)
+    {
+        var (location, verifier) = await AuthorizeAsync(client, discordId);
+        var query = System.Web.HttpUtility.ParseQueryString(location.Query);
+        Assert.Equal("http://localhost:51180/", location.GetLeftPart(UriPartial.Path));
+        Assert.Equal("xyz", query["state"]);
+        var code = query["code"];
+        Assert.False(string.IsNullOrEmpty(code), "authorization code が無い: " + location);
+
+        var response = await PostTokenAsync(client, new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = ClientId,
+            ["code"] = code!,
+            ["redirect_uri"] = RedirectUri,
+            ["code_verifier"] = verifier,
+        });
+        return await ReadTokenAsync(response);
+    }
+
+    private static Task<HttpResponseMessage> RefreshAsync(HttpClient client, string refreshToken) =>
+        PostTokenAsync(client, new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = ClientId,
+            ["refresh_token"] = refreshToken,
+        });
+
+    private static JsonElement DecodePart(string jwt, int index)
+    {
+        var parts = jwt.Split('.');
+        using var doc = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(parts[index]));
+        return doc.RootElement.Clone();
+    }
+
+    private X509Certificate2 LoadCer() => X509CertificateLoader.LoadCertificateFromFile(
+        Path.Combine(_factory.CertificateDirectory, "server-signing-certificate.cer"));
+
+    private static string QueryValue(Uri uri, string key) => System.Web.HttpUtility.ParseQueryString(uri.Query)[key]!;
+
+    [Fact]
+    public async Task AuthorizationCodeFlow_IssuesJwsAccessToken_WithOnlySubAndNameClaims()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "alice");
+        using var client = _factory.CreateIdpClient();
+
+        var token = await LoginAsync(client, id);
+
+        // JWS(ドットが2つ。暗号化されていない)
+        Assert.Equal(2, token.AccessToken.Count(c => c == '.'));
+        var header = DecodePart(token.AccessToken, 0);
+        var payload = DecodePart(token.AccessToken, 1);
+        Assert.Equal("RS256", header.GetProperty("alg").GetString());
+        Assert.False(header.TryGetProperty("enc", out _));
+
+        Assert.Equal(IdpFactory.Issuer, payload.GetProperty("iss").GetString());
+        Assert.Equal(id.ToString(), payload.GetProperty("sub").GetString());
+        Assert.Equal("alice", payload.GetProperty("name").GetString());
+        Assert.False(payload.TryGetProperty("aud", out _));
+        Assert.False(payload.TryGetProperty("role", out _));
+        Assert.False(payload.TryGetProperty("oi_reg_id", out _));
+        Assert.False(payload.TryGetProperty("oi_prvd_name", out _));
+        var lifetime = payload.GetProperty("exp").GetInt64() - payload.GetProperty("iat").GetInt64();
+        Assert.InRange(lifetime, 3590, 3610);
+        Assert.Equal(3600, token.ExpiresIn);
+        Assert.False(string.IsNullOrEmpty(token.RefreshToken));
+
+        // ユーザー由来の claim は sub と name だけ。残りは OpenIddict のプロトコル claim(許可リスト)
+        var allowed = new HashSet<string>
+        {
+            "sub", "name",
+            "iss", "iat", "exp", "jti", "scope", "client_id", "oi_prst", "oi_au_id", "oi_tkn_id",
+        };
+        var unexpected = payload.EnumerateObject().Select(p => p.Name).Where(n => !allowed.Contains(n)).ToList();
+        Assert.True(unexpected.Count == 0, "想定外の claim: " + string.Join(",", unexpected) + " / " + payload);
+    }
+
+    [Fact]
+    public async Task AccessToken_ValidatesStaticallyWithCerFile()
+    {
+        // Crew と TTC が行う静的検証そのもの
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "bob");
+        using var client = _factory.CreateIdpClient();
+        var token = await LoginAsync(client, id);
+
+        using var cer = LoadCer();
+        Assert.False(cer.HasPrivateKey);
+        var result = await new JsonWebTokenHandler().ValidateTokenAsync(token.AccessToken, new TokenValidationParameters
+        {
+            ValidIssuer = IdpFactory.Issuer,
+            IssuerSigningKey = new X509SecurityKey(cer),
+            ValidateIssuer = true,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+        });
+
+        Assert.True(result.IsValid, result.Exception?.ToString());
+        Assert.Equal(id.ToString(), result.Claims["sub"]);
+
+        // 別の鍵では通らない
+        using var other = RSA.Create(2048);
+        var wrong = await new JsonWebTokenHandler().ValidateTokenAsync(token.AccessToken, new TokenValidationParameters
+        {
+            ValidIssuer = IdpFactory.Issuer,
+            IssuerSigningKey = new RsaSecurityKey(other),
+            ValidateAudience = false,
+        });
+        Assert.False(wrong.IsValid);
+    }
+
+    [Fact]
+    public async Task Discovery_MatchesIssuer_AndJwksMatchesCer()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "carol");
+        using var client = _factory.CreateIdpClient();
+        var token = await LoginAsync(client, id);
+
+        var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
+        Assert.Equal(IdpFactory.Issuer, discovery.GetProperty("issuer").GetString());
+        Assert.EndsWith("/connect/authorize", discovery.GetProperty("authorization_endpoint").GetString());
+        Assert.EndsWith("/connect/token", discovery.GetProperty("token_endpoint").GetString());
+        Assert.EndsWith("/connect/revoke", discovery.GetProperty("revocation_endpoint").GetString());
+
+        // 各エンドポイントの URL は issuer ではなくリクエストの host から組み立てられる(issuer だけが固定)
+        var jwksUri = new Uri(discovery.GetProperty("jwks_uri").GetString()!);
+        Assert.Equal("/.well-known/jwks", jwksUri.AbsolutePath);
+        var jwks = await client.GetFromJsonAsync<JsonElement>(jwksUri.PathAndQuery, Ct);
+        var key = Assert.Single(jwks.GetProperty("keys").EnumerateArray());
+
+        using var cer = LoadCer();
+        var parameters = cer.GetRSAPublicKey()!.ExportParameters(false);
+        Assert.Equal(Base64UrlEncoder.Encode(parameters.Modulus!), key.GetProperty("n").GetString());
+        Assert.Equal(Base64UrlEncoder.Encode(parameters.Exponent!), key.GetProperty("e").GetString());
+        Assert.Equal(DecodePart(token.AccessToken, 0).GetProperty("kid").GetString(),
+            key.GetProperty("kid").GetString());
+    }
+
+    [Fact]
+    public async Task Refresh_ReturnsNewTokens_AndReflectsLatestUsername()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "dave");
+        using var client = _factory.CreateIdpClient();
+        var token = await LoginAsync(client, id);
+
+        _factory.Lookup.SetMember(id, "dave-renamed");
+        var refreshed = await ReadTokenAsync(await RefreshAsync(client, token.RefreshToken!));
+
+        Assert.NotEqual(token.AccessToken, refreshed.AccessToken);
+        Assert.False(string.IsNullOrEmpty(refreshed.RefreshToken));
+        Assert.NotEqual(token.RefreshToken, refreshed.RefreshToken); // rolling
+        var payload = DecodePart(refreshed.AccessToken, 1);
+        Assert.Equal(id.ToString(), payload.GetProperty("sub").GetString());
+        Assert.Equal("dave-renamed", payload.GetProperty("name").GetString());
+        Assert.False(payload.TryGetProperty("aud", out _));
+        Assert.Equal(2, refreshed.AccessToken.Count(c => c == '.'));
+    }
+
+    [Fact]
+    public async Task Revoke_ThenRefresh_IsInvalidGrant()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "erin");
+        using var client = _factory.CreateIdpClient();
+        var token = await LoginAsync(client, id);
+
+        var revoke = await client.PostAsync("connect/revoke", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["token"] = token.RefreshToken!,
+            ["token_type_hint"] = "refresh_token",
+            ["client_id"] = ClientId,
+        }), Ct);
+        Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+
+        var refresh = await RefreshAsync(client, token.RefreshToken!);
+        Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
+        var json = await refresh.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Equal("invalid_grant", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Refresh_AfterLeavingTheGuild_IsInvalidGrant()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "frank");
+        using var client = _factory.CreateIdpClient();
+        var token = await LoginAsync(client, id);
+
+        _factory.Lookup.RemoveMember(id);
+        var refresh = await RefreshAsync(client, token.RefreshToken!);
+
+        Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
+        var json = await refresh.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Equal("invalid_grant", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Authorize_NonMember_RedirectsWithAccessDenied()
+    {
+        var id = NewDiscordId(); // メンバーに登録しない
+        using var client = _factory.CreateIdpClient();
+
+        var (location, _) = await AuthorizeAsync(client, id);
+
+        Assert.StartsWith(RedirectUri, location.AbsoluteUri);
+        Assert.Equal("access_denied", QueryValue(location, "error"));
+        Assert.Null(System.Web.HttpUtility.ParseQueryString(location.Query)["code"]);
+    }
+
+    [Fact]
+    public async Task Authorize_BotNotReady_RedirectsWithTemporarilyUnavailable()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "grace");
+        using var client = _factory.CreateIdpClient();
+
+        _factory.Lookup.IsReady = false;
+        try
+        {
+            var (location, _) = await AuthorizeAsync(client, id);
+            Assert.Equal("temporarily_unavailable", QueryValue(location, "error"));
+        }
+        finally
+        {
+            _factory.Lookup.IsReady = true;
+        }
+    }
+
+    [Fact]
+    public async Task Refresh_BotNotReady_IsTemporarilyUnavailable()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "heidi");
+        using var client = _factory.CreateIdpClient();
+        var token = await LoginAsync(client, id);
+
+        _factory.Lookup.IsReady = false;
+        try
+        {
+            var refresh = await RefreshAsync(client, token.RefreshToken!);
+            var body = await refresh.Content.ReadAsStringAsync(Ct);
+            // token エンドポイントは invalid_grant などと同じく 400 で返す
+            Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
+            using var json = JsonDocument.Parse(body);
+            Assert.Equal("temporarily_unavailable", json.RootElement.GetProperty("error").GetString());
+        }
+        finally
+        {
+            _factory.Lookup.IsReady = true;
+        }
+
+        // トークンは無効になっておらず、Ready に戻れば更新できる
+        var again = await RefreshAsync(client, token.RefreshToken!);
+        Assert.True(again.IsSuccessStatusCode, await again.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task OnlyOfflineAccessScope_IsGranted()
+    {
+        var id = NewDiscordId();
+        _factory.Lookup.SetMember(id, "ivan");
+        using var client = _factory.CreateIdpClient();
+
+        var (location, verifier) = await AuthorizeAsync(client, id, "offline_access");
+        var response = await PostTokenAsync(client, new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = ClientId,
+            ["code"] = QueryValue(location, "code"),
+            ["redirect_uri"] = RedirectUri,
+            ["code_verifier"] = verifier,
+        });
+        var token = await ReadTokenAsync(response);
+
+        Assert.Equal("offline_access", token.Scope);
+    }
+
+    [Fact]
+    public async Task Healthz_ReflectsBotReadiness()
+    {
+        using var client = _factory.CreateIdpClient();
+
+        var ok = await client.GetAsync("healthz", Ct);
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+
+        _factory.Lookup.IsReady = false;
+        try
+        {
+            var notReady = await client.GetAsync("healthz", Ct);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, notReady.StatusCode);
+        }
+        finally
+        {
+            _factory.Lookup.IsReady = true;
+        }
+    }
+
+    [Fact]
+    public async Task SigningCertificate_CerIsWrittenAndDiffersPerFile()
+    {
+        using var client = _factory.CreateIdpClient();
+        await client.GetAsync("healthz", Ct); // 起動させる
+
+        Assert.True(File.Exists(Path.Combine(_factory.CertificateDirectory, "server-signing-certificate.pfx")));
+        using var cer = LoadCer();
+        Assert.Equal("CN=Tatehama Shukkindai Server Signing Certificate", cer.Subject);
+    }
+}
