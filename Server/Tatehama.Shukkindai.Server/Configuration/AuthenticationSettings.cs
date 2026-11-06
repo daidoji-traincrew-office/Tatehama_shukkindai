@@ -28,9 +28,10 @@ public sealed class AuthenticationSettingsValidator : IValidateOptions<Authentic
         {
             errors.Add("Authentication:Issuer は必須です。");
         }
-        else if (!Uri.TryCreate(options.Issuer, UriKind.Absolute, out _))
+        else if (!Uri.TryCreate(options.Issuer, UriKind.Absolute, out var issuer) ||
+                 issuer.Scheme is not ("http" or "https"))
         {
-            errors.Add("Authentication:Issuer は絶対 URI でなければなりません。");
+            errors.Add("Authentication:Issuer はhttp または https の絶対 URI でなければなりません。");
         }
         else if (!options.Issuer.EndsWith('/'))
         {
