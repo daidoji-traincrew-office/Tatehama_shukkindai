@@ -73,5 +73,6 @@ CREATE TABLE "OpenIddictTokens"
     CONSTRAINT "FK_OpenIddictTokens_OpenIddictAuthorizations_authorization_id" FOREIGN KEY (authorization_id) REFERENCES "OpenIddictAuthorizations" (id)
 );
 
+CREATE INDEX "IX_OpenIddictTokens_application_id_status_subject_type" ON "OpenIddictTokens" (application_id, status, subject, type);
 CREATE INDEX "IX_OpenIddictTokens_authorization_id" ON "OpenIddictTokens" (authorization_id);
 CREATE UNIQUE INDEX "IX_OpenIddictTokens_reference_id" ON "OpenIddictTokens" (reference_id);
