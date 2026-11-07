@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
-using Tatehama.Shukkindai.Server.Authentication;
+using Tatehama.Shukkindai.Server.Services;
 using Tatehama.Shukkindai.Server.IT.Collection;
 using Tatehama.Shukkindai.Server.IT.Fixture;
 using static Tatehama.Shukkindai.Server.IT.TestUtilities.IdpTestHelper;
@@ -36,11 +36,11 @@ public sealed class ClientApplicationServiceTest(WebApplicationFixture fixture)
 
         try
         {
-            await scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().EnsureRegisteredAsync(Ct);
+            await scope.ServiceProvider.GetRequiredService<IClientApplicationService>().CreateOrUpdate(Ct);
 
             var after = new OpenIddictApplicationDescriptor();
             await manager.PopulateAsync(after, (await manager.FindByClientIdAsync(ClientId, Ct))!, Ct);
-            var expected = scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().CreateDescriptor();
+            var expected = scope.ServiceProvider.GetRequiredService<IClientApplicationService>().CreateDescriptor();
             Assert.Equal(expected.RedirectUris.Select(u => u.AbsoluteUri).Order(),
                 after.RedirectUris.Select(u => u.AbsoluteUri).Order());
             Assert.Equal(expected.Permissions.Order(), after.Permissions.Order());
@@ -50,7 +50,7 @@ public sealed class ClientApplicationServiceTest(WebApplicationFixture fixture)
         finally
         {
             // 他のテストに影響しないよう、最新の記述子に戻す
-            await scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().EnsureRegisteredAsync(Ct);
+            await scope.ServiceProvider.GetRequiredService<IClientApplicationService>().CreateOrUpdate(Ct);
         }
     }
 }

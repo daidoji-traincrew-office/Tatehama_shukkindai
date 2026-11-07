@@ -62,7 +62,7 @@ public class Program
         builder.Services.AddHostedService<DiscordBotHostedService>();
         builder.Services.AddScoped<IUserLoginObserver, NoOpUserLoginObserver>();
         builder.Services.AddScoped<TokenPrincipalService>();
-        builder.Services.AddScoped<ClientApplicationRegistrar>();
+        builder.Services.AddScoped<IClientApplicationService, ClientApplicationService>();
         builder.Services.AddScoped<ITokenPruningService, TokenPruningService>();
         builder.Services.AddHostedService<TokenPruningHostedService>();
     }
@@ -117,7 +117,7 @@ public class Program
     private static async Task RegisterOpenIddictApplication(WebApplication app)
     {
         await using var scope = app.Services.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().EnsureRegisteredAsync();
+        await scope.ServiceProvider.GetRequiredService<IClientApplicationService>().CreateOrUpdate();
     }
 
     private static T BindAndValidate<T>(WebApplicationBuilder builder, string section, IValidateOptions<T> validator)

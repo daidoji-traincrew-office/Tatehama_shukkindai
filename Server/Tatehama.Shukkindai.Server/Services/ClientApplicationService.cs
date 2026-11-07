@@ -3,12 +3,23 @@ using OpenIddict.Abstractions;
 using Tatehama.Shukkindai.Server.Configuration;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace Tatehama.Shukkindai.Server.Authentication;
+namespace Tatehama.Shukkindai.Server.Services;
 
-/// <summary>出勤台クライアント(public client)を登録する。既に登録済みでも、記述子で必ず上書きする。</summary>
-public sealed class ClientApplicationRegistrar(
+public interface IClientApplicationService
+{
+    OpenIddictApplicationDescriptor CreateDescriptor();
+
+    /// <summary>出勤台クライアントを登録する。既に登録済みなら、記述子で上書きする。</summary>
+    Task CreateOrUpdate(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// 出勤台クライアント(public client)を登録する。既に登録済みでも、記述子で必ず上書きする。
+/// OpenIddict のマネージャーは Repository に相当するものとして、Service から直接使う。
+/// </summary>
+public class ClientApplicationService(
     IOpenIddictApplicationManager manager,
-    IOptions<AuthenticationSettings> settings)
+    IOptions<AuthenticationSettings> settings) : IClientApplicationService
 {
     public const string ClientId = "Tatehama_Shukkindai_Client";
 
@@ -42,7 +53,7 @@ public sealed class ClientApplicationRegistrar(
         return descriptor;
     }
 
-    public async Task EnsureRegisteredAsync(CancellationToken cancellationToken = default)
+    public async Task CreateOrUpdate(CancellationToken cancellationToken = default)
     {
         var descriptor = CreateDescriptor();
         var application = await manager.FindByClientIdAsync(ClientId, cancellationToken);

@@ -1,20 +1,20 @@
 using Microsoft.Extensions.Options;
 using Moq;
 using OpenIddict.Abstractions;
-using Tatehama.Shukkindai.Server.Authentication;
+using Tatehama.Shukkindai.Server.Services;
 using Tatehama.Shukkindai.Server.Configuration;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace Tatehama.Shukkindai.Server.UT.Authentication;
+namespace Tatehama.Shukkindai.Server.UT.Services;
 
-public class ClientApplicationRegistrarTests
+public class ClientApplicationServiceTest
 {
     private readonly Mock<IOpenIddictApplicationManager> _manager = new();
-    private readonly ClientApplicationRegistrar _registrar;
+    private readonly ClientApplicationService _service;
 
-    public ClientApplicationRegistrarTests()
+    public ClientApplicationServiceTest()
     {
-        _registrar = new ClientApplicationRegistrar(_manager.Object, Options.Create(new AuthenticationSettings
+        _service = new ClientApplicationService(_manager.Object, Options.Create(new AuthenticationSettings
         {
             ClientRedirectPorts = [51180, 51181],
         }));
@@ -41,16 +41,16 @@ public class ClientApplicationRegistrarTests
     }
 
     [Fact]
-    public async Task NotRegistered_CreatesWithExpectedDescriptor()
+    public async Task CreateOrUpdate_NotRegistered_CreatesWithExpectedDescriptor()
     {
-        _manager.Setup(m => m.FindByClientIdAsync(ClientApplicationRegistrar.ClientId, It.IsAny<CancellationToken>()))
+        _manager.Setup(m => m.FindByClientIdAsync(ClientApplicationService.ClientId, It.IsAny<CancellationToken>()))
             .Returns(new ValueTask<object?>((object?)null));
         OpenIddictApplicationDescriptor? created = null;
         _manager.Setup(m => m.CreateAsync(It.IsAny<OpenIddictApplicationDescriptor>(), It.IsAny<CancellationToken>()))
             .Callback<OpenIddictApplicationDescriptor, CancellationToken>((d, _) => created = d)
             .Returns(new ValueTask<object>(new object()));
 
-        await _registrar.EnsureRegisteredAsync(TestContext.Current.CancellationToken);
+        await _service.CreateOrUpdate(TestContext.Current.CancellationToken);
 
         Assert.NotNull(created);
         AssertDescriptor(created);
@@ -59,10 +59,10 @@ public class ClientApplicationRegistrarTests
     }
 
     [Fact]
-    public async Task AlreadyRegistered_UpdatesWithDescriptor_AndDoesNotCreate()
+    public async Task CreateOrUpdate_AlreadyRegistered_UpdatesWithDescriptorAndDoesNotCreate()
     {
         var existing = new object();
-        _manager.Setup(m => m.FindByClientIdAsync(ClientApplicationRegistrar.ClientId, It.IsAny<CancellationToken>()))
+        _manager.Setup(m => m.FindByClientIdAsync(ClientApplicationService.ClientId, It.IsAny<CancellationToken>()))
             .Returns(new ValueTask<object?>(existing));
         OpenIddictApplicationDescriptor? updated = null;
         _manager.Setup(m => m.UpdateAsync(existing, It.IsAny<OpenIddictApplicationDescriptor>(),
@@ -70,7 +70,7 @@ public class ClientApplicationRegistrarTests
             .Callback<object, OpenIddictApplicationDescriptor, CancellationToken>((_, d, _) => updated = d)
             .Returns(ValueTask.CompletedTask);
 
-        await _registrar.EnsureRegisteredAsync(TestContext.Current.CancellationToken);
+        await _service.CreateOrUpdate(TestContext.Current.CancellationToken);
 
         Assert.NotNull(updated);
         AssertDescriptor(updated);
