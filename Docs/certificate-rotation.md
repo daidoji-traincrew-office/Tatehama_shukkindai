@@ -329,14 +329,102 @@ docker run --rm -u 1654 -v "$PWD/idp-cert:/c" -v "$PWD/Server/tools:/t:ro" mcr.m
 - 生成は `cert/.rotation.lock` の排他ロックの中で行い、ロックを取った後に一覧を読み直す。同じホストのプロセス間では効くが、NFS などのネットワークファイルシステムでは効かないことがある。
 - 切り替えは再起動のときだけなので、**すべてのインスタンスを再起動**すること。暗号化鍵は、新しい鍵を使い始めたインスタンスが暗号化したトークンを、まだ新しい鍵を読み込んでいないインスタンスが復号できない時間ができる。ローリング再起動のときは、この点を考慮する。
 
+## 処理の流れ(コードの読み方)
+
+コードを初めて読むときの地図。決定事項と理由は、この文書のほかの節にある(ここでは繰り返さない)。呼び出しの順番は、クラスの先頭と各メソッドの `// --- 1. 〜 ---` のコメントにも書いてある。
+
+### 起動時の流れ
+
+起動時の確認は、生成や削除より先に行う。ここで止めるときは、**何も作らず、何も消さない**。
+
+```mermaid
+sequenceDiagram
+    participant P as Program.cs
+    participant H as CertificateRotationHostedService
+    participant C as OpenIddict*CertificateConfiguration
+    participant S as CertificateService
+    participant R as CertificateRepository
+    P->>H: StartAsync(最初の hosted service)
+    H->>S: GetStartupCertificates
+    Note over S: 初回の呼び出しだけ実行(以降は同じ結果)
+    S->>R: PreflightChecks: GetAll(読むだけ)
+    Note over S: 止める: 壊れた pfx / 空で Bootstrap 不許可 /<br/>時計が過去 / 署名が全部無効
+    S->>R: WithLock(取れなければ待つ。30 秒)
+    S->>R: Rotate: Create / Delete(用途ごと)
+    S->>R: SyncPublic(.cer を書く・消す)
+    Note over S: 止める: ロックや public/ が失敗 /<br/>公開済みの有効な署名鍵が無い / 他の用途の鍵が無い
+    S->>R: 候補を Load(署名は公開済みの鍵だけ)
+    S-->>H: CertificateSet
+    H->>C: options.CurrentValue を取り出す
+    C->>S: GetStartupCertificates(同じ結果)
+    C-->>H: OpenIddict に登録
+```
+
+1. `Program.cs` の `ConfigureCertificateServices` が、Repository・Service・Metrics・OpenIddict の設定クラス・HostedService を登録する(Development 以外)。
+2. `CertificateRotationHostedService.StartAsync` が `GetStartupCertificates` を呼ぶ。続けて OpenIddict の options を取り出し、`OpenIddict*CertificateConfiguration`(Server と Client)が証明書を登録する。options はここで 1 回作られ、動いているプロセスでは作り直さない。
+3. `GetStartupCertificates`(`CertificateService.LoadStartupCertificates`)の段階:
+   - **事前確認**(`PreflightChecks`、副作用なし)で止める条件: 壊れた pfx、用途のディレクトリが空で `AllowCertificateBootstrap` が false、時計が既存の鍵の NotBefore より過去、署名が全部無効。
+   - **ロックの中で生成・削除・公開**(`RotateAll` → `Rotate`、`SyncPublic`)。失敗しても用途ごとに続けるが、ロックと `public/` の失敗は起動を止める。
+   - **候補の選択**: 署名は期限内で `public/` に同じ `.cer` がある鍵だけ。有効な署名鍵・暗号化鍵が無い、Client 用の鍵が無い、のどれかなら止める。
+   - 選んだ鍵を「このプロセスが使う鍵」として覚える(消さない・再起動の要否の比較元)。
+4. 止めるとき(例外)の理由と対処は「手順書」の各項目を参照。
+
+### 動作中の流れ
+
+```mermaid
+flowchart LR
+    T["HostedService<br/>24 時間ごとの PeriodicTimer<br/>(起動直後にも 1 回)"] --> M[CertificateService.Maintain]
+    M --> RA["RotateAll<br/>WithLock の中"]
+    RA --> RO["Rotate(用途ごと)<br/>Policy.Plan → Create / Delete"]
+    RA --> SP[SyncPublic]
+    M --> BS["BuildStatus<br/>(ディスクの現状)"]
+    BS --> LS["LogStatus<br/>7101〜7113"]
+    BS -.読む.-> ME["CertificateMetrics<br/>(ObservableGauge)"]
+```
+
+- `Maintain` は、ローテーション → 状態の作り直し → ログの順。失敗しても例外にせず、次の周期に回す。
+- 判断(作る・消す)は `CertificateRotationPolicy.Plan`、実行は Repository。
+- 「再起動が必要」は、`LogStatus` が `IsRestartRequired` で判定して `RestartRequired`(7105)を出す。メトリクス `shukkindai.certificate.restart_required` は、`CertificateMetrics` が `GetStatus` を読み取り時点の時刻で計算する。**動いているプロセスの鍵は、これらが出ても変わらない**(再起動のときだけ)。
+
+### 1 本の鍵のライフサイクル(署名)
+
+詳細な日付は「署名証明書のタイムライン」。E は、現在の鍵の NotAfter。
+
+| 時点 | 起きること | 担当 |
+|---|---|---|
+| E-150 日 | 次の鍵を作る(NotBefore = E-60 日)。pfx を `server-signing/` に書く | `Policy.DecideCreate` → `Repository.Create` |
+| 作成と同じ周期 | `public/` に `.cer` を書く。この時点から Crew と TTC が読める | `Repository.SyncPublic` |
+| E-60 日 | 次の鍵が有効になる。動いているプロセスは古い鍵のまま。`RestartRequired` が出る | `Policy.IsRestartRequired` |
+| 次の再起動 | 起動時の候補(公開済みで期限内)のうち NotAfter が最も遠い鍵で署名を始める | `Policy.SelectActive` |
+| E | 古い鍵が期限切れ(署名の検証側は期限を見ない) | |
+| E+7 日以降 | 古い鍵の pfx と `.cer` を削除。ただし、プロセスの起動から 7 日未満、またはそのプロセスが使っているなら残す | `Policy.Plan` → `Repository.Delete` / `SyncPublic` |
+
+署名以外の違い(寿命はどれも 2 年。値は「用途と寿命」の表):
+
+| 用途 | 次を作る | 有効になる時期 | 削除 | 公開 |
+|---|---|---|---|---|
+| server-signing | 残り 150 日 | 未来(E-60 日。先に公開) | E+7 日 | `public/` に `.cer` |
+| server-encryption | 残り 60 日 | すぐ | E+14 日 | しない |
+| client-signing / client-encryption | 残り 60 日 | すぐ | E+1 日 | しない |
+
+### クラスごとの責務
+
+| ファイル | 役割 | 副作用 |
+|---|---|---|
+| `Program.cs`(`ConfigureCertificateServices`) | 登録 | なし |
+| `HostedService/CertificateRotationHostedService.cs` | 起動時の呼び出しと 24 時間ごとの周期 | `Maintain` を通じてあり |
+| `Authentication/OpenIddictCertificateConfiguration.cs` | 起動時の証明書を OpenIddict に登録 | OpenIddict の options を変える |
+| `Services/Certificate/CertificateService.cs` | 呼ぶ順番、起動時に止めるかの判断、状態の保持、ログ | 状態をメモリに持つ。ディスクは Repository 経由 |
+| `Services/Certificate/CertificateRotationPolicy.cs` | 作る・消す・使う鍵の判断(閾値は `RuleFor`) | なし(純粋関数) |
+| `Repositories/Certificate/CertificateRepository.cs` | pfx と `.cer` の読み書き、権限、ロック | ディスク |
+| `Services/Certificate/CertificateLog.cs` | ログ(EventId 7101〜7113) | ログ出力 |
+| `Services/Certificate/CertificateMetrics.cs` | メトリクス | なし(読み取り時に計算) |
+| `Models/CertificateInfo.cs`、`CertificateStatus.cs` | 証明書のメタデータと状態の型 | なし |
+
 ## 実装メモ(コードの場所)
 
-- `Services/Certificate/CertificateRotationPolicy.cs`: 作る・消すの判断(純粋関数。時刻と証明書の一覧から決める)
-- `Services/Certificate/CertificateService.cs`: 起動時の読み込み(`GetStartupCertificates`)と定期実行(`Maintain`)、状態のスナップショット
-- `Repositories/Certificate/`: ファイルの I/O(原子的な書き込み、権限、ロック)
-- `Authentication/OpenIddictCertificateConfiguration.cs`: 起動時に決めた証明書を OpenIddict の Server と Client に登録する
-- `HostedService/CertificateRotationHostedService.cs`: Kestrel が listen する前に証明書をそろえ(OpenIddict の options もここで作る)、24 時間ごとに `Maintain` を呼ぶ
-- `Services/Certificate/CertificateMetrics.cs`、`Services/Certificate/CertificateLog.cs`: メトリクスとログ
+ファイルごとの役割は「処理の流れ(コードの読み方)」の「クラスごとの責務」を参照。
+
 - OpenIddict の挙動(複数の証明書、NotBefore が未来の鍵、options の作り直しが 1 回だけであること)は、調査報告をもとにしている。OpenIddict を上げたときは、IT(`CertificateRotationTest`)で挙動が変わっていないか確かめること。
 
 ## 既知の制約
