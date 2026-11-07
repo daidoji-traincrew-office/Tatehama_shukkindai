@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 using Tatehama.Shukkindai.Server.IT.Collection;
 using Tatehama.Shukkindai.Server.IT.Fixture;
 using Tatehama.Shukkindai.Server.IT.TestUtilities;
@@ -206,5 +209,65 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         Assert.Equal(valid.Thumbprint, await LoginKid(client, fixture, "grace"));
         Assert.Equal([valid.Thumbprint], await CertificateTestEnvironment.JwksKids(client));
         Assert.Equal(new[] { expired.Thumbprint, valid.Thumbprint }.Order(), env.PublicThumbprints());
+    }
+
+    private static TokenValidationParameters CrewParameters(CertificateTestEnvironment env, bool validateIssuerSigningKey)
+    {
+        // Docs/authentication.md の検証例と同じ: public/ の *.cer を全部、検証鍵にする
+        var keys = Directory.EnumerateFiles(env.PublicDirectory, "*.cer")
+            .Select(path => (SecurityKey)new X509SecurityKey(X509CertificateLoader.LoadCertificateFromFile(path)))
+            .ToList();
+        return new TokenValidationParameters
+        {
+            ValidIssuer = WebApplicationFixture.Issuer,
+            IssuerSigningKeys = keys,
+            ValidateIssuer = true,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = validateIssuerSigningKey,
+            ValidTypes = ["at+jwt"],
+            // トークンの期限は、テストの時計(OpenIddict と同じ FakeTimeProvider)で確かめる
+            LifetimeValidator = (notBefore, expires, _, _) =>
+                (notBefore is null || notBefore <= env.Now) && expires is not null && expires >= env.Now,
+        };
+    }
+
+    [Fact]
+    public async Task AccessToken_ValidatesWithAllPublicCerFilesSelectedByKid_BeforeAndAfterSwitch()
+    {
+        using var env = new CertificateTestEnvironment();
+        env.Seed(CertificatePurpose.ServerSigning, -600, 100);
+        env.Seed(CertificatePurpose.ServerSigning, 40, 770);
+        string before;
+        using (var factory = env.CreateFactory(fixture))
+        {
+            using var client = factory.CreateIdpClient();
+            var id = NewDiscordId();
+            fixture.DiscordRepository.SetMember(id, "heidi");
+            before = (await Login(client, id)).AccessToken;
+        }
+
+        string after;
+        env.Time.Advance(TimeSpan.FromDays(41));
+        using (var factory = env.CreateFactory(fixture))
+        {
+            using var client = factory.CreateIdpClient();
+            var id = NewDiscordId();
+            fixture.DiscordRepository.SetMember(id, "heidi");
+            after = (await Login(client, id)).AccessToken;
+        }
+
+        Assert.NotEqual(DecodePart(before, 0).GetProperty("kid").GetString(), DecodePart(after, 0).GetProperty("kid").GetString());
+        var handler = new JsonWebTokenHandler();
+        // 切り替えの前後で、別の鍵で署名されたトークンが、同じ鍵の集合で検証できる
+        var parameters = CrewParameters(env, validateIssuerSigningKey: false);
+        Assert.Equal(2, ((ICollection<SecurityKey>)parameters.IssuerSigningKeys).Count);
+        var afterResult = await handler.ValidateTokenAsync(after, parameters);
+        Assert.True(afterResult.IsValid, afterResult.Exception?.Message);
+        // 前のトークンは 41 日前に発行したもの(1 時間で期限切れ)なので、ここでは鍵の選択だけを確かめる
+        parameters.ValidateLifetime = false;
+        parameters.LifetimeValidator = null;
+        var beforeResult = await handler.ValidateTokenAsync(before, parameters);
+        Assert.True(beforeResult.IsValid, beforeResult.Exception?.Message);
     }
 }

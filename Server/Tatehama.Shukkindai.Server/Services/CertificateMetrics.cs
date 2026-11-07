@@ -33,9 +33,9 @@ public sealed class CertificateMetrics : IDisposable
             description: "Time until the certificate this process is using expires. Negative if already expired.");
         _meter.CreateObservableGauge(NewestRemainingTimeName, ObserveNewestRemainingTime, unit: "s",
             description: "Time until the newest certificate on disk expires. A low value means automatic rotation has stalled.");
-        _meter.CreateObservableGauge(RestartRequiredName, ObserveRestartRequired, unit: "1",
+        _meter.CreateObservableGauge(RestartRequiredName, ObserveRestartRequired, unit: "{bool}",
             description: "1 if the certificate that should be used now differs from the one this process is using (restart to switch).");
-        _meter.CreateObservableGauge(NextSigningExistsName, ObserveNextSigningExists, unit: "1",
+        _meter.CreateObservableGauge(NextSigningExistsName, ObserveNextSigningExists, unit: "{bool}",
             description: "1 if a server signing certificate that is not yet valid (next key) exists.");
         _meter.CreateObservableGauge(NextSigningActivationTimeName, ObserveNextSigningActivationTime, unit: "s",
             description: "Time until the next server signing certificate becomes valid. Only reported while one exists.");

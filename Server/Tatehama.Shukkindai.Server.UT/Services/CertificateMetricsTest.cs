@@ -185,8 +185,8 @@ public sealed class CertificateMetricsTest : IDisposable
             {
                 ("shukkindai.certificate.remaining_time", "s"),
                 ("shukkindai.certificate.newest_remaining_time", "s"),
-                ("shukkindai.certificate.restart_required", "1"),
-                ("shukkindai.certificate.next_signing.exists", "1"),
+                ("shukkindai.certificate.restart_required", "{bool}"),
+                ("shukkindai.certificate.next_signing.exists", "{bool}"),
                 ("shukkindai.certificate.next_signing.activation_time", "s"),
                 ("shukkindai.certificate.rotation.last_success_timestamp", "s"),
             }.Order(),
