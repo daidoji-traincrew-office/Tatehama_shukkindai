@@ -1,0 +1,82 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Tatehama.Shukkindai.Server.Authentication;
+using Tatehama.Shukkindai.Server.Discord;
+
+namespace Tatehama.Shukkindai.Server.IT.Fixture;
+
+public sealed class WebApplicationFixture : WebApplicationFactory<Program>
+{
+    public const string Issuer = "https://tatehama-shukkindai-test.example/";
+    public const string ConnectionString =
+        "Host=localhost;Port=5434;Database=postgres;Username=postgres;Password=postgres";
+
+    public string CertificateDirectory { get; } =
+        Path.Combine(Path.GetTempPath(), "shukkindai-it-" + Guid.NewGuid());
+
+    public FakeDiscordMemberLookup Lookup { get; } = new();
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        // Development 以外にして、本番と同じファイル証明書の経路(.cer の書き出しを含む)を通す
+        builder.UseEnvironment("IntegrationTest");
+        // Program は builder.Configuration を早い段階で読む。環境変数でプロセス全体を汚さないよう UseSetting で渡す
+        builder.UseSetting("Authentication:Issuer", Issuer);
+        builder.UseSetting("Authentication:CertificateDirectory", CertificateDirectory);
+        builder.UseSetting("ConnectionStrings:DefaultConnection", ConnectionString);
+        builder.UseSetting("Logging:LogLevel:Microsoft.EntityFrameworkCore", "Warning");
+        builder.UseSetting("Discord:ClientId", "dummy-client-id");
+        builder.UseSetting("Discord:ClientSecret", "dummy-client-secret");
+        builder.UseSetting("Discord:BotToken", "dummy-bot-token");
+        builder.UseSetting("Discord:GuildId", "1");
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<DiscordBotHostedService>();
+            foreach (var descriptor in services
+                         .Where(d => d.ImplementationType == typeof(DiscordBotHostedService)
+                                     || d.ServiceType == typeof(IDiscordMemberLookup)).ToList())
+            {
+                services.Remove(descriptor);
+            }
+
+            services.AddSingleton<IDiscordMemberLookup>(Lookup);
+            services.AddAuthentication()
+                .AddScheme<AuthenticationSchemeOptions, TestDiscordAuthenticationHandler>(
+                    TestDiscordAuthenticationHandler.SchemeName, _ => { });
+            services.AddAuthentication()
+                .AddScheme<AuthenticationSchemeOptions, TestDiscordCallbackAuthenticationHandler>(
+                    TestDiscordCallbackAuthenticationHandler.SchemeName, _ => { });
+            services.Configure<ExternalLoginOptions>(o =>
+            {
+                o.ChallengeScheme = TestDiscordAuthenticationHandler.SchemeName;
+                o.CallbackScheme = TestDiscordCallbackAuthenticationHandler.SchemeName;
+            });
+        });
+    }
+
+    public HttpClient CreateIdpClient() => CreateClient(new WebApplicationFactoryClientOptions
+    {
+        BaseAddress = new Uri("https://localhost/"),
+        AllowAutoRedirect = false,
+        HandleCookies = true,
+    });
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing && Directory.Exists(CertificateDirectory))
+        {
+            Directory.Delete(CertificateDirectory, true);
+        }
+    }
+}
