@@ -28,14 +28,27 @@ public class Program
         var discordSettings = BindAndValidate<DiscordSettings>(
             builder, DiscordSettings.SectionName, new DiscordSettingsValidator());
 
+        var certificates = new List<(string, X509Certificate2)>();
+        ConfigureServices(builder, authenticationSettings, discordSettings, isDevelopment, certificates);
+
+        var app = builder.Build();
+        Configure(app, authenticationSettings, isDevelopment, certificates);
+        ConfigureEndpoints(app);
+        await RegisterOpenIddictApplication(app);
+
+        await app.RunAsync();
+    }
+
+    private static void ConfigureServices(
+        WebApplicationBuilder builder, AuthenticationSettings authenticationSettings,
+        DiscordSettings discordSettings, bool isDevelopment, List<(string, X509Certificate2)> certificates)
+    {
         ConfigureOptions(builder);
         ConfigureLogging(builder);
         ConfigureForwardedHeadersService(builder);
         ConfigureDatabase(builder);
         ConfigureAuthenticationServices(builder);
 
-        var certificates = new List<(string, X509Certificate2)>();
-        var certificatePaths = CertificateStore.PfxPaths(authenticationSettings.CertificateDirectory).ToList();
         var openIddict = ConfigureOpenIddictServer(builder, authenticationSettings, isDevelopment, certificates);
         ConfigureOpenIddictClient(openIddict, authenticationSettings, discordSettings, isDevelopment, certificates);
 
@@ -47,11 +60,15 @@ public class Program
         builder.Services.AddScoped<TokenPrincipalService>();
         builder.Services.AddScoped<ClientApplicationRegistrar>();
         builder.Services.AddHostedService<TokenPruningService>();
+    }
 
-        var app = builder.Build();
-
+    private static void Configure(
+        WebApplication app, AuthenticationSettings authenticationSettings, bool isDevelopment,
+        List<(string, X509Certificate2)> certificates)
+    {
         CertificateStore.WarnIfExpiring(certificates, app.Logger, DateTimeOffset.UtcNow);
-        foreach (var path in certificatePaths.Where(CertificateStore.IsPermissionTooOpen))
+        foreach (var path in CertificateStore.PfxPaths(authenticationSettings.CertificateDirectory)
+                     .Where(CertificateStore.IsPermissionTooOpen))
         {
             app.Logger.LogWarning("Certificate file {Path} is readable by group/others. Use mode 0600.", path);
         }
@@ -66,7 +83,10 @@ public class Program
         app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();
+    }
 
+    private static void ConfigureEndpoints(WebApplication app)
+    {
         app.MapGet("/healthz", async (ApplicationDbContext db, IDiscordMemberLookup lookup, CancellationToken ct) =>
             {
                 var databaseOk = false;
@@ -86,13 +106,12 @@ public class Program
             .AllowAnonymous()
             .WithHttpLogging(HttpLoggingFields.None);
         app.MapControllers();
+    }
 
-        await using (var scope = app.Services.CreateAsyncScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().EnsureRegisteredAsync();
-        }
-
-        await app.RunAsync();
+    private static async Task RegisterOpenIddictApplication(WebApplication app)
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<ClientApplicationRegistrar>().EnsureRegisteredAsync();
     }
 
     private static T BindAndValidate<T>(WebApplicationBuilder builder, string section, IValidateOptions<T> validator)
