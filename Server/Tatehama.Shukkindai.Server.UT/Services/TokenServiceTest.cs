@@ -3,29 +3,29 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using OpenIddict.Abstractions;
-using Tatehama.Shukkindai.Server.Authentication;
+
 using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Services;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace Tatehama.Shukkindai.Server.UT.Authentication;
+namespace Tatehama.Shukkindai.Server.UT.Services;
 
-public class TokenPrincipalServiceTests
+public class TokenServiceTest
 {
     private const ulong UserId = 123456789012345678UL;
 
-    private readonly Mock<IDiscordService> _lookup = new();
+    private readonly Mock<IDiscordService> _discordService = new();
     private readonly Mock<IUserLoginObserver> _observer = new();
-    private readonly TokenPrincipalService _service;
+    private readonly TokenService _service;
 
-    public TokenPrincipalServiceTests()
+    public TokenServiceTest()
     {
-        _service = new TokenPrincipalService(_lookup.Object, _observer.Object,
-            NullLogger<TokenPrincipalService>.Instance);
+        _service = new TokenService(_discordService.Object, _observer.Object,
+            NullLogger<TokenService>.Instance);
     }
 
     private void SetLookup(MemberLookupStatus status, string? username = null) =>
-        _lookup.Setup(l => l.GetMemberById(UserId))
+        _discordService.Setup(l => l.GetMemberById(UserId))
             .ReturnsAsync(new MemberLookupResult(status, username));
 
     private static ClaimsPrincipal CreateRefreshPrincipal(string? sub, string name, params string[] scopes)
@@ -39,11 +39,11 @@ public class TokenPrincipalServiceTests
     }
 
     [Fact]
-    public async Task Authorize_Member_SetsSubAndNameOnlyForAccessToken()
+    public async Task CreatePrincipalForAuthorization_Member_SetsSubAndNameOnlyForAccessToken()
     {
         SetLookup(MemberLookupStatus.Member, "alice");
 
-        var result = await _service.CreateForAuthorizationAsync(UserId, [Scopes.OfflineAccess], "127.0.0.1",
+        var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OfflineAccess], "127.0.0.1",
             TestContext.Current.CancellationToken);
 
         var success = Assert.IsType<TokenPrincipalResult.Success>(result);
@@ -58,15 +58,15 @@ public class TokenPrincipalServiceTests
         // ユーザー由来の claim は sub と name だけ
         Assert.Equal(new[] { Claims.Name, Claims.Subject },
             principal.Claims.Where(c => c.Type != Claims.Private.Scope).Select(c => c.Type).Order());
-        _observer.Verify(o => o.OnUserLoggedInAsync(UserId, "alice", It.IsAny<CancellationToken>()), Times.Once);
+        _observer.Verify(o => o.OnUserLoggedIn(UserId, "alice", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task Authorize_Member_KeepsOnlyOfflineAccessScope()
+    public async Task CreatePrincipalForAuthorization_Member_KeepsOnlyOfflineAccessScope()
     {
         SetLookup(MemberLookupStatus.Member, "alice");
 
-        var result = await _service.CreateForAuthorizationAsync(UserId,
+        var result = await _service.CreatePrincipalForAuthorization(UserId,
             [Scopes.OpenId, Scopes.Profile, "OFFLINE_ACCESS", "other"], "127.0.0.1",
             TestContext.Current.CancellationToken);
 
@@ -77,50 +77,50 @@ public class TokenPrincipalServiceTests
     }
 
     [Fact]
-    public async Task Authorize_Member_WithoutOfflineAccess_HasNoScopes()
+    public async Task CreatePrincipalForAuthorization_Member_WithoutOfflineAccess_HasNoScopes()
     {
         SetLookup(MemberLookupStatus.Member, "alice");
 
-        var result = await _service.CreateForAuthorizationAsync(UserId, [Scopes.OpenId], "127.0.0.1",
+        var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OpenId], "127.0.0.1",
             TestContext.Current.CancellationToken);
 
         Assert.Empty(Assert.IsType<TokenPrincipalResult.Success>(result).Principal.GetScopes());
     }
 
     [Fact]
-    public async Task Authorize_NotMember_IsAccessDenied_AndObserverIsNotCalled()
+    public async Task CreatePrincipalForAuthorization_NotMember_IsAccessDenied_AndObserverIsNotCalled()
     {
         SetLookup(MemberLookupStatus.NotMember);
 
-        var result = await _service.CreateForAuthorizationAsync(UserId, [Scopes.OfflineAccess], "127.0.0.1",
+        var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OfflineAccess], "127.0.0.1",
             TestContext.Current.CancellationToken);
 
         var rejected = Assert.IsType<TokenPrincipalResult.Rejected>(result);
         Assert.Equal(Errors.AccessDenied, rejected.Error);
         Assert.Equal("Discord サーバーのメンバーではありません。", rejected.Description);
-        _observer.Verify(o => o.OnUserLoggedInAsync(It.IsAny<ulong>(), It.IsAny<string>(),
+        _observer.Verify(o => o.OnUserLoggedIn(It.IsAny<ulong>(), It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task Authorize_Unavailable_IsTemporarilyUnavailable()
+    public async Task CreatePrincipalForAuthorization_Unavailable_IsTemporarilyUnavailable()
     {
         SetLookup(MemberLookupStatus.Unavailable);
 
-        var result = await _service.CreateForAuthorizationAsync(UserId, [Scopes.OfflineAccess], "127.0.0.1",
+        var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OfflineAccess], "127.0.0.1",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(Errors.TemporarilyUnavailable, Assert.IsType<TokenPrincipalResult.Rejected>(result).Error);
-        _observer.Verify(o => o.OnUserLoggedInAsync(It.IsAny<ulong>(), It.IsAny<string>(),
+        _observer.Verify(o => o.OnUserLoggedIn(It.IsAny<ulong>(), It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task Refresh_NotMember_IsInvalidGrant()
+    public async Task CreatePrincipalForRefresh_NotMember_IsInvalidGrant()
     {
         SetLookup(MemberLookupStatus.NotMember);
 
-        var result = await _service.CreateForRefreshAsync(
+        var result = await _service.CreatePrincipalForRefresh(
             CreateRefreshPrincipal(UserId.ToString(), "old", Scopes.OfflineAccess), TestContext.Current.CancellationToken);
 
         var rejected = Assert.IsType<TokenPrincipalResult.Rejected>(result);
@@ -129,11 +129,11 @@ public class TokenPrincipalServiceTests
     }
 
     [Fact]
-    public async Task Refresh_Member_ReplacesNameWithLatest_KeepsSubAndScopes()
+    public async Task CreatePrincipalForRefresh_Member_ReplacesNameWithLatest_KeepsSubAndScopes()
     {
         SetLookup(MemberLookupStatus.Member, "new-name");
 
-        var result = await _service.CreateForRefreshAsync(
+        var result = await _service.CreatePrincipalForRefresh(
             CreateRefreshPrincipal(UserId.ToString(), "old-name", Scopes.OfflineAccess), TestContext.Current.CancellationToken);
 
         var principal = Assert.IsType<TokenPrincipalResult.Success>(result).Principal;
@@ -147,7 +147,7 @@ public class TokenPrincipalServiceTests
             Assert.Equal([Destinations.AccessToken], claim.GetDestinations());
         }
 
-        _observer.Verify(o => o.OnUserLoggedInAsync(It.IsAny<ulong>(), It.IsAny<string>(),
+        _observer.Verify(o => o.OnUserLoggedIn(It.IsAny<ulong>(), It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -155,20 +155,20 @@ public class TokenPrincipalServiceTests
     [InlineData(null)]
     [InlineData("not-a-number")]
     [InlineData("-1")]
-    public async Task Refresh_InvalidSub_IsInvalidGrant(string? sub)
+    public async Task CreatePrincipalForRefresh_InvalidSub_IsInvalidGrant(string? sub)
     {
-        var result = await _service.CreateForRefreshAsync(CreateRefreshPrincipal(sub, "x"), TestContext.Current.CancellationToken);
+        var result = await _service.CreatePrincipalForRefresh(CreateRefreshPrincipal(sub, "x"), TestContext.Current.CancellationToken);
 
         Assert.Equal(Errors.InvalidGrant, Assert.IsType<TokenPrincipalResult.Rejected>(result).Error);
-        _lookup.Verify(l => l.GetMemberById(It.IsAny<ulong>()), Times.Never);
+        _discordService.Verify(l => l.GetMemberById(It.IsAny<ulong>()), Times.Never);
     }
 
     [Fact]
-    public async Task Refresh_Unavailable_IsTemporarilyUnavailable()
+    public async Task CreatePrincipalForRefresh_Unavailable_IsTemporarilyUnavailable()
     {
         SetLookup(MemberLookupStatus.Unavailable);
 
-        var result = await _service.CreateForRefreshAsync(
+        var result = await _service.CreatePrincipalForRefresh(
             CreateRefreshPrincipal(UserId.ToString(), "old"), TestContext.Current.CancellationToken);
 
         Assert.Equal(Errors.TemporarilyUnavailable, Assert.IsType<TokenPrincipalResult.Rejected>(result).Error);

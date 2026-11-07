@@ -8,12 +8,14 @@ using OpenIddict.Abstractions;
 using OpenIddict.Client.AspNetCore;
 using OpenIddict.Server.AspNetCore;
 using Tatehama.Shukkindai.Server.Authentication;
+using Tatehama.Shukkindai.Server.Models;
+using Tatehama.Shukkindai.Server.Services;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Tatehama.Shukkindai.Server.Controllers;
 
 public class AuthorizationController(
-    TokenPrincipalService tokenPrincipalService,
+    ITokenService tokenService,
     IOptions<ExternalLoginOptions> externalLoginOptions)
     : ControllerBase
 {
@@ -56,7 +58,7 @@ public class AuthorizationController(
         }
 
         var remoteIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        var result = await tokenPrincipalService.CreateForAuthorizationAsync(
+        var result = await tokenService.CreatePrincipalForAuthorization(
             discordUserId, request.GetScopes(), remoteIpAddress, cancellationToken);
         return ToResult(result);
     }
@@ -86,7 +88,7 @@ public class AuthorizationController(
                 return Results.SignIn(principal, properties: null, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
             }
 
-            return ToResult(await tokenPrincipalService.CreateForRefreshAsync(principal, cancellationToken));
+            return ToResult(await tokenService.CreatePrincipalForRefresh(principal, cancellationToken));
         }
 
         return Fail(Errors.UnsupportedGrantType, "このグラントタイプには対応していません。");
@@ -109,7 +111,7 @@ public class AuthorizationController(
                 var failureIdentity = new ClaimsIdentity("ExternalLoginFailed");
                 failureIdentity.AddClaim(new Claim(ExternalLoginFailure.ClaimType,
                     ExternalLoginFailure.MapError(discordError)));
-                return await SignInAndRedirectAsync(new ClaimsPrincipal(failureIdentity), returnUri);
+                return await SignInAndRedirect(new ClaimsPrincipal(failureIdentity), returnUri);
             }
 
             // 戻り先が分からない(state が無い・壊れている・期限切れなど)場合は、サーバー側でエラーを表示する
@@ -133,12 +135,12 @@ public class AuthorizationController(
 
         // Discord のトークンなどを Cookie に持ち回らない。戻り先(元の authorize の URL)だけ使う
         var successReturnUri = result.Properties.RedirectUri;
-        return await SignInAndRedirectAsync(new ClaimsPrincipal(identity),
+        return await SignInAndRedirect(new ClaimsPrincipal(identity),
             !string.IsNullOrEmpty(successReturnUri) && Url.IsLocalUrl(successReturnUri) ? successReturnUri : "/");
     }
 
     /// <summary>ログイン途中の Cookie を発行し、(ローカルの)戻り先へ 302 で戻す。Cookie ハンドラは自動では戻さない。</summary>
-    private async Task<IResult> SignInAndRedirectAsync(ClaimsPrincipal principal, string localReturnUri)
+    private async Task<IResult> SignInAndRedirect(ClaimsPrincipal principal, string localReturnUri)
     {
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
         return Results.LocalRedirect(localReturnUri);

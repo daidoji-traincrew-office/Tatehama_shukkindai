@@ -62,7 +62,7 @@ public class Program
         builder.Services.AddSingleton<IDiscordService, DiscordService>();
         builder.Services.AddHostedService<DiscordBotHostedService>();
         builder.Services.AddScoped<IUserLoginObserver, NoOpUserLoginObserver>();
-        builder.Services.AddScoped<TokenPrincipalService>();
+        builder.Services.AddScoped<ITokenService, TokenService>();
         builder.Services.AddScoped<IClientApplicationService, ClientApplicationService>();
         builder.Services.AddScoped<ITokenPruningService, TokenPruningService>();
         builder.Services.AddHostedService<TokenPruningHostedService>();

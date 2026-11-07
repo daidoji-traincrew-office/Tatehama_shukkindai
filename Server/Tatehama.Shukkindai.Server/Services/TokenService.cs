@@ -1,30 +1,32 @@
 using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
+using Tatehama.Shukkindai.Server.Authentication;
 using Tatehama.Shukkindai.Server.Models;
-using Tatehama.Shukkindai.Server.Services;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace Tatehama.Shukkindai.Server.Authentication;
+namespace Tatehama.Shukkindai.Server.Services;
 
-public abstract record TokenPrincipalResult
+public interface ITokenService
 {
-    public sealed record Success(ClaimsPrincipal Principal) : TokenPrincipalResult;
+    Task<TokenPrincipalResult> CreatePrincipalForAuthorization(
+        ulong discordUserId, IEnumerable<string> requestedScopes, string remoteIpAddress,
+        CancellationToken cancellationToken);
 
-    /// <param name="Error">access_denied / invalid_grant / temporarily_unavailable など</param>
-    public sealed record Rejected(string Error, string Description) : TokenPrincipalResult;
+    Task<TokenPrincipalResult> CreatePrincipalForRefresh(
+        ClaimsPrincipal refreshTokenPrincipal, CancellationToken cancellationToken);
 }
 
 /// <summary>トークンに載せる principal を作る。判断はここに集め、コントローラーは HTTP の糊に徹する。</summary>
-public sealed class TokenPrincipalService(
+public class TokenService(
     IDiscordService discordService,
     IUserLoginObserver observer,
-    ILogger<TokenPrincipalService> logger)
+    ILogger<TokenService> logger) : ITokenService
 {
     private const string UnavailableDescription =
         "Discord との連携の準備ができていません。しばらくしてから再試行してください。";
 
-    public async Task<TokenPrincipalResult> CreateForAuthorizationAsync(
+    public async Task<TokenPrincipalResult> CreatePrincipalForAuthorization(
         ulong discordUserId, IEnumerable<string> requestedScopes, string remoteIpAddress,
         CancellationToken cancellationToken)
     {
@@ -50,7 +52,7 @@ public sealed class TokenPrincipalService(
         identity.SetScopes(((string[])[Scopes.OfflineAccess]).Intersect(requestedScopes, StringComparer.OrdinalIgnoreCase));
         TokenDestinations.Apply(identity);
 
-        await observer.OnUserLoggedInAsync(discordUserId, username, cancellationToken);
+        await observer.OnUserLoggedIn(discordUserId, username, cancellationToken);
         logger.LogInformation(
             "User logged in. RemoteIpAddress: {RemoteIpAddress}, DiscordMemberName: {DiscordMemberName}, UserId: {UserId}",
             remoteIpAddress, username, discordUserId);
@@ -58,7 +60,7 @@ public sealed class TokenPrincipalService(
         return new TokenPrincipalResult.Success(new ClaimsPrincipal(identity));
     }
 
-    public async Task<TokenPrincipalResult> CreateForRefreshAsync(
+    public async Task<TokenPrincipalResult> CreatePrincipalForRefresh(
         ClaimsPrincipal refreshTokenPrincipal, CancellationToken cancellationToken)
     {
         if (!ulong.TryParse(refreshTokenPrincipal.FindFirst(Claims.Subject)?.Value, out var discordUserId))
