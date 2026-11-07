@@ -4,7 +4,7 @@ using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Repositories.Certificate;
 
-namespace Tatehama.Shukkindai.Server.Services;
+namespace Tatehama.Shukkindai.Server.Services.Certificate;
 
 public interface ICertificateService
 {

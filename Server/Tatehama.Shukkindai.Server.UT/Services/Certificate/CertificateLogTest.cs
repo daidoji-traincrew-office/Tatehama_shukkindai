@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
-using Tatehama.Shukkindai.Server.Services;
+using Tatehama.Shukkindai.Server.Services.Certificate;
 
-namespace Tatehama.Shukkindai.Server.UT.Services;
+namespace Tatehama.Shukkindai.Server.UT.Services.Certificate;
 
 public class CertificateLogTest
 {

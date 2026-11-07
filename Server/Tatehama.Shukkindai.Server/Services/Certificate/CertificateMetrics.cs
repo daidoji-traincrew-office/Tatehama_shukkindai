@@ -1,7 +1,7 @@
 using System.Diagnostics.Metrics;
 using Tatehama.Shukkindai.Server.Models;
 
-namespace Tatehama.Shukkindai.Server.Services;
+namespace Tatehama.Shukkindai.Server.Services.Certificate;
 
 /// <summary>
 /// 証明書のメトリクス(OpenTelemetry の自前の Meter)。すべて ObservableGauge で、読み取られた時点の時刻で計算する

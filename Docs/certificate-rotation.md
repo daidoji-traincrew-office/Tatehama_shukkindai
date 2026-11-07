@@ -331,12 +331,12 @@ docker run --rm -u 1654 -v "$PWD/idp-cert:/c" -v "$PWD/Server/tools:/t:ro" mcr.m
 
 ## 実装メモ(コードの場所)
 
-- `Services/CertificateRotationPolicy.cs`: 作る・消すの判断(純粋関数。時刻と証明書の一覧から決める)
-- `Services/CertificateService.cs`: 起動時の読み込み(`GetStartupCertificates`)と定期実行(`Maintain`)、状態のスナップショット
+- `Services/Certificate/CertificateRotationPolicy.cs`: 作る・消すの判断(純粋関数。時刻と証明書の一覧から決める)
+- `Services/Certificate/CertificateService.cs`: 起動時の読み込み(`GetStartupCertificates`)と定期実行(`Maintain`)、状態のスナップショット
 - `Repositories/Certificate/`: ファイルの I/O(原子的な書き込み、権限、ロック)
 - `Authentication/OpenIddictCertificateConfiguration.cs`: 起動時に決めた証明書を OpenIddict の Server と Client に登録する
 - `HostedService/CertificateRotationHostedService.cs`: Kestrel が listen する前に証明書をそろえ(OpenIddict の options もここで作る)、24 時間ごとに `Maintain` を呼ぶ
-- `Services/CertificateMetrics.cs`、`Services/CertificateLog.cs`: メトリクスとログ
+- `Services/Certificate/CertificateMetrics.cs`、`Services/Certificate/CertificateLog.cs`: メトリクスとログ
 - OpenIddict の挙動(複数の証明書、NotBefore が未来の鍵、options の作り直しが 1 回だけであること)は、調査報告をもとにしている。OpenIddict を上げたときは、IT(`CertificateRotationTest`)で挙動が変わっていないか確かめること。
 
 ## 既知の制約

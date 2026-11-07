@@ -21,6 +21,7 @@ using Tatehama.Shukkindai.Server.Repositories.Certificate;
 using Tatehama.Shukkindai.Server.Repositories.Database;
 using Tatehama.Shukkindai.Server.Repositories.Discord;
 using Tatehama.Shukkindai.Server.Services;
+using Tatehama.Shukkindai.Server.Services.Certificate;
 
 namespace Tatehama.Shukkindai.Server;
 

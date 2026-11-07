@@ -10,7 +10,7 @@ using Tatehama.Shukkindai.Server.IT.Collection;
 using Tatehama.Shukkindai.Server.IT.Fixture;
 using Tatehama.Shukkindai.Server.IT.TestUtilities;
 using Tatehama.Shukkindai.Server.Models;
-using Tatehama.Shukkindai.Server.Services;
+using Tatehama.Shukkindai.Server.Services.Certificate;
 using static Tatehama.Shukkindai.Server.IT.TestUtilities.IdpTestHelper;
 
 namespace Tatehama.Shukkindai.Server.IT.Authentication;

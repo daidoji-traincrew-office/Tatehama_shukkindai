@@ -3,7 +3,7 @@ using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Repositories.Certificate;
 using Tatehama.Shukkindai.Server.UT.TestUtilities;
 
-namespace Tatehama.Shukkindai.Server.UT.Repositories;
+namespace Tatehama.Shukkindai.Server.UT.Repositories.Certificate;
 
 public sealed class CertificateRepositoryTest : IDisposable
 {

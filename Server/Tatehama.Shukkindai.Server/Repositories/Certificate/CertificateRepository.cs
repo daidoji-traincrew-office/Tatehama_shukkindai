@@ -3,7 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Options;
 using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Models;
-using Tatehama.Shukkindai.Server.Services;
+using Tatehama.Shukkindai.Server.Services.Certificate;
 
 namespace Tatehama.Shukkindai.Server.Repositories.Certificate;
 

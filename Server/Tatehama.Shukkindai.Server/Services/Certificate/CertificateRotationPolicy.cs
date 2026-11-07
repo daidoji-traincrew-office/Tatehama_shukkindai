@@ -1,7 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using Tatehama.Shukkindai.Server.Models;
 
-namespace Tatehama.Shukkindai.Server.Services;
+namespace Tatehama.Shukkindai.Server.Services.Certificate;
 
 /// <summary>用途ごとの、証明書の寿命とローテーションの方針。</summary>
 /// <param name="DirectoryName"><c>cert/</c> の下の用途別ディレクトリ名。ログの <c>CertificatePurpose</c> にも使う。</param>

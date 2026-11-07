@@ -3,7 +3,7 @@ using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Client;
 using OpenIddict.Server;
 using Tatehama.Shukkindai.Server.Models;
-using Tatehama.Shukkindai.Server.Services;
+using Tatehama.Shukkindai.Server.Services.Certificate;
 
 namespace Tatehama.Shukkindai.Server.Authentication;
 

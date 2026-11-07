@@ -1,6 +1,6 @@
 using Tatehama.Shukkindai.Server.Models;
 
-namespace Tatehama.Shukkindai.Server.Services;
+namespace Tatehama.Shukkindai.Server.Services.Certificate;
 
 /// <summary>
 /// 証明書まわりの構造化ログ。EventId は固定(Loki などのアラートが数値で絞り込むため、変えない)。

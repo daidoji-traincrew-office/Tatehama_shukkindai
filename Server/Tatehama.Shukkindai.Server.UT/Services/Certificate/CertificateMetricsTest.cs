@@ -3,10 +3,10 @@ using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Time.Testing;
 using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Repositories.Certificate;
-using Tatehama.Shukkindai.Server.Services;
+using Tatehama.Shukkindai.Server.Services.Certificate;
 using Tatehama.Shukkindai.Server.UT.TestUtilities;
 
-namespace Tatehama.Shukkindai.Server.UT.Services;
+namespace Tatehama.Shukkindai.Server.UT.Services.Certificate;
 
 public sealed class CertificateMetricsTest : IDisposable
 {
