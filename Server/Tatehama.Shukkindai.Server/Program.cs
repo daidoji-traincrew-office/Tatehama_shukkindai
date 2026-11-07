@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -12,6 +13,8 @@ using Tatehama.Shukkindai.Server.Certificates;
 using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Data;
 using Tatehama.Shukkindai.Server.Discord;
+using Tatehama.Shukkindai.Server.HostedService;
+using Tatehama.Shukkindai.Server.Services;
 
 namespace Tatehama.Shukkindai.Server;
 
@@ -52,6 +55,7 @@ public class Program
         var openIddict = ConfigureOpenIddictServer(builder, authenticationSettings, isDevelopment, certificates);
         ConfigureOpenIddictClient(openIddict, authenticationSettings, discordSettings, isDevelopment, certificates);
 
+        builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddControllers();
         builder.Services.AddSingleton<DiscordMemberLookup>();
         builder.Services.AddSingleton<IDiscordMemberLookup>(sp => sp.GetRequiredService<DiscordMemberLookup>());
@@ -59,7 +63,8 @@ public class Program
         builder.Services.AddScoped<IUserLoginObserver, NoOpUserLoginObserver>();
         builder.Services.AddScoped<TokenPrincipalService>();
         builder.Services.AddScoped<ClientApplicationRegistrar>();
-        builder.Services.AddHostedService<TokenPruningService>();
+        builder.Services.AddScoped<ITokenPruningService, TokenPruningService>();
+        builder.Services.AddHostedService<TokenPruningHostedService>();
     }
 
     private static void Configure(
