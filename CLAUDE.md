@@ -15,9 +15,13 @@ dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 
 ## ディレクトリ
 - `Docs/`: 要件定義・ユースケース・計画・`authentication.md`
-- `Server/Tatehama.Shukkindai.Server`: ASP.NET Core(IdP + 将来の出勤台 API)
-- `Server/Tatehama.Shukkindai.Server.UT`: xUnit v3 + Moq(DB なし)
-- `Server/Tatehama.Shukkindai.Server.IT`: WebApplicationFactory + 実 DB(localhost:5434)
+- `Server/Tatehama.Shukkindai.Server`: ASP.NET Core(IdP + 将来の出勤台 API)。構造は Traincrew_MultiATS_Server に揃えている
+  - `Controllers/`(HTTP の糊)→ `Services/`(判断。interface は同じファイル)→ `Repositories/`(外部とのやり取り。interface は別ファイル)の順に呼ぶ。Controller から Repository は呼ばない
+  - `HostedService/`(薄く保つ)、`Models/`(結果型など)、`Authentication/`(ASP.NET と OpenIddict の糊)、`Configuration/`、`Data/`
+  - OpenIddict のマネージャーは Repository に相当するものとして Service から使う(包まない)
+  - 自分で書くメソッドには `Async` を付けない(override とフレームワークの呼び出しは除く)
+- `Server/Tatehama.Shukkindai.Server.UT`: xUnit v3 + Moq(DB なし)。クラスは `XxxTest`、メソッドは `Method_Condition_Result`
+- `Server/Tatehama.Shukkindai.Server.IT`: WebApplicationFactory + 実 DB(localhost:5434)。`Fixture/`・`Collection/`(`[Collection("WebApplication")]` で fixture を 1 つにまとめる)・`TestUtilities/`
 - `Server/Database/`: Atlas(`schema.sql` があるべき状態、`migrations/` に diff)
 - `Client/`, `Common/`: MVP では空
 
@@ -28,6 +32,8 @@ dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 - ユーザー由来の claim は `sub` と `name` だけ。ロール・社員番号・`oi_reg_id`・`oi_prvd_name` は入れない。
 - openid scope は使わず(宣言も受付もしない)、PKCE は S256 だけ。
 - 発行時と refresh のたびに、現在の Discord サーバーのメンバーかを確かめる(入鋏ロールは見ない)。
+- Discord の判定は Bot のギルドキャッシュだけで行う(REST にフォールバックしない)。Gateway 接続中・ギルドあり・`guild.IsConnected`・`guild.HasAllMembers` の 4 条件がそろわなければ `temporarily_unavailable`(Discord と同期し直している最中だけ起きる)。
+- 起動時に Discord に接続できない、またはギルドが見つからないときは、起動に失敗する(待つ上限は 30 秒)。
 
 ## ローカル起動
 Discord の設定は全環境で必須(未設定だと起動時に例外)。User Secrets に入れる。

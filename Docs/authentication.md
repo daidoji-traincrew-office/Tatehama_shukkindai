@@ -71,12 +71,12 @@ var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new Token
 | 場面 | error | 意味 | クライアントの動作 |
 |---|---|---|---|
 | authorize | `access_denied` | Discord サーバーのメンバーではない(未参加・退会済み) | ログインできないことを表示する |
-| authorize | `temporarily_unavailable` | Bot の準備ができていない | しばらくしてから再試行を案内する |
+| authorize | `temporarily_unavailable` | Discord と同期し直している最中(接続が切れた直後など) | しばらくしてから再試行を案内する |
 | authorize | `access_denied` | Discord の同意画面で、利用者が拒否またはキャンセルした。description は「Discord での認可が拒否されました。」 | ログインが拒否されたことを表示する |
 | authorize | `temporarily_unavailable` | Discord 側が `temporarily_unavailable` を返した | しばらくしてから再試行を案内する |
 | authorize | `server_error` | Discord 側のそれ以外のエラー(`server_error`、`invalid_request`、不明なもの)。description は「Discord でのログインに失敗しました。」 | エラーを表示し、再試行できるようにする |
 | token(refresh) | `invalid_grant` | refresh token が無効・失効、またはメンバーでなくなった | 保存したトークンを捨て、再ログインさせる |
-| token(refresh) | `temporarily_unavailable` | Bot の準備ができていない | トークンは捨てず、後で再試行する |
+| token(refresh) | `temporarily_unavailable` | Discord と同期し直している最中(接続が切れた直後など) | トークンは捨てず、後で再試行する |
 
 token エンドポイントのエラーは、`invalid_grant` も `temporarily_unavailable` も HTTP 400 で、body は `{"error":"...","error_description":"...","error_uri":"..."}`(JSON)。ステータスコードでは区別できないので、`error` を見ること。authorize のエラーは、クライアントのリダイレクト URI に `error` と `error_description` のクエリで返る。
 
@@ -95,7 +95,9 @@ token エンドポイントのエラーは、`invalid_grant` も `temporarily_un
 
 ## 運用上の注意
 
-- `/healthz` は readiness 用(DB 接続と Bot の Ready を見る)。Discord 側の障害で 503 になりうるので、liveness には使わない。
+- Discord の判定は Bot のギルドキャッシュだけで行い、REST には問い合わせない(`AlwaysDownloadUsers` で全メンバーを持つ)。キャッシュを信用するのは、Gateway に接続中・ギルドが見つかる・ギルドが接続中・全メンバーを受け取り済み、の 4 条件が全部そろったときだけ。1 つでも欠けると `temporarily_unavailable` を返す(メンバーでないとは言い切れないため)。切断後の再接続など、Discord と同期し直している間だけ起きる。
+- 起動時に Bot のログイン・ギルドの発見・全メンバーの受信を最大 30 秒待つ。Discord に接続できない(トークン不正を含む)、またはギルドが見つからない(`Discord:GuildId` の誤り、Bot が未参加)場合は、**起動に失敗する**(例外でプロセスが終わる)。ASP.NET Core は hosted service の起動が終わってから listen するので、起動直後に `temporarily_unavailable` が返ることは基本的にない。
+- `/healthz` は readiness 用(DB 接続と、Discord との同期を見る)。Discord 側の障害で 503 になりうるので、liveness には使わない。
 - 証明書の有効期限が切れると、OpenIddict が拒否するため IdP は起動しなくなる。2年の期限の前に更新が要る(30日前から起動時に Warning ログを出す)。
 - `cert/` の pfx(秘密鍵を含む)は、Unix では 0600、ディレクトリは 0700 で作る。権限が緩いと起動時に Warning を出す。
 - `.cer` は起動のたびに、署名用 pfx と照合して必要なら書き直す。
@@ -110,7 +112,7 @@ token エンドポイントのエラーは、`invalid_grant` も `temporarily_un
 ## デプロイ時の人間の作業
 
 - Discord アプリのリダイレクト URI に `{issuer}auth/callback` を追加する。
-- Discord Developer Portal で、Bot の **Server Members Intent** を有効にする。Bot を対象のギルドに招待する(`Discord:GuildId` と一致させる。Bot がギルドにいないと Ready 後に Error ログが出て、認証は常に `temporarily_unavailable` になる)。
+- Discord Developer Portal で、Bot の **Server Members Intent** を有効にする。Bot を対象のギルドに招待する(`Discord:GuildId` と一致させる。Bot がギルドにいない、または `Discord:GuildId` が違うと、起動に失敗する)。
 - DB に、`Server/Database/migrations/` を `atlas migrate apply` で適用する。
 - `cert/` を永続化する(署名・暗号化の証明書と `.cer` が入る。コンテナ作り直しで消えると、全トークンが無効になる)。コンテナのユーザーが書き込めること、権限が 0600 / 0700 であること。
 - リバースプロキシの IP を設定 `ProxyIP` に入れる。リバースプロキシは `X-Forwarded-Host` / `X-Forwarded-Proto` を、クライアントから来た値を素通しせず、自分で上書きすること(エンドポイントの URL とリダイレクト URI の組み立てに使われる)。
