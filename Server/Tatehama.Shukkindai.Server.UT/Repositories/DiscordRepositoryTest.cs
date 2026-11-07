@@ -1,4 +1,8 @@
 using Discord;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Tatehama.Shukkindai.Server.Configuration;
+using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Repositories.Discord;
 
 namespace Tatehama.Shukkindai.Server.UT.Repositories;
@@ -28,9 +32,44 @@ public class DiscordRepositoryTest
         Assert.Equal(expected, actual);
     }
 
+    // SocketGuild(IsConnected / HasAllMembers)の状態は、外から作れないので、ここでは再現できない。
+    // 4 条件の根拠は Discord.Net 3.20.2 のソース: DiscordSocketClient.EventHandling.cs:93-127(re-identify の READY で
+    // ギルドが仮オブジェクトに差し替わる)、SocketGuild.cs:163・431-491(IsConnected / HasAllMembers)、
+    // DiscordSocketClient.cs:338-368・1060-1078。実機での確認は手順書にある。
+
+    private static DiscordRepository CreateRepository(string botToken = "dummy") =>
+        new(Options.Create(new DiscordSettings { ClientId = "id", ClientSecret = "secret", BotToken = botToken, GuildId = 1 }),
+            NullLogger<DiscordRepository>.Instance);
+
     [Fact]
-    public void StartupTimeout_Always_IsThirtySeconds()
+    public async Task GetMember_NotLoggedIn_IsUnavailable()
     {
-        Assert.Equal(TimeSpan.FromSeconds(30), DiscordRepository.StartupTimeout);
+        var repository = CreateRepository();
+
+        Assert.False(repository.IsReady());
+        Assert.False(repository.IsReady(null));
+        var result = await repository.GetMember(123);
+
+        Assert.Equal(MemberLookupStatus.Unavailable, result.Status);
+        Assert.Null(result.Username);
+    }
+
+    [Fact]
+    public async Task Initialize_MalformedBotToken_ThrowsArgumentException()
+    {
+        var repository = CreateRepository("not-a-token");
+
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.Initialize(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public void DescribeStartupFailure_NotConnected_BlamesGatewayConnectionNotGuild()
+    {
+        var message = CreateRepository().DescribeStartupFailure();
+
+        Assert.Contains("could not connect to the Discord Gateway", message);
+        Assert.Contains("BotToken", message);
+        Assert.Contains("Server Members", message);
+        Assert.DoesNotContain("was not found", message);
     }
 }
