@@ -7,7 +7,7 @@ using Tatehama.Shukkindai.Server.Services;
 
 namespace Tatehama.Shukkindai.Server.Repositories.Certificate;
 
-public class CertificateRepository : ICertificateRepository
+public sealed class CertificateRepository : ICertificateRepository
 {
     public const string PublicDirectoryName = "public";
     public const string LockFileName = ".rotation.lock";
@@ -53,7 +53,19 @@ public class CertificateRepository : ICertificateRepository
         }
 
         var result = new List<CertificateInfo>();
-        foreach (var path in Directory.EnumerateFiles(directory)
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(directory).ToList();
+        }
+        catch (UnauthorizedAccessException e)
+        {
+            throw new InvalidDataException(
+                $"Certificate directory {directory} cannot be read (permission denied). The container user must own cert/ " +
+                "(e.g. UID 1654 for the official image). See Docs/certificate-rotation.md.", e);
+        }
+
+        foreach (var path in files
                      .Where(p => string.Equals(Path.GetExtension(p), ".pfx", StringComparison.OrdinalIgnoreCase))
                      .Order(StringComparer.Ordinal))
         {
@@ -61,6 +73,12 @@ public class CertificateRepository : ICertificateRepository
             {
                 using var certificate = X509CertificateLoader.LoadPkcs12FromFile(path, string.Empty);
                 result.Add(ToInfo(purpose, certificate, path));
+            }
+            catch (Exception e) when (e is UnauthorizedAccessException || e.InnerException is UnauthorizedAccessException)
+            {
+                throw new InvalidDataException(
+                    $"Certificate file {path} cannot be read (permission denied). The container user must own cert/ " +
+                    "(e.g. UID 1654 for the official image) and the files must be 0600. See Docs/certificate-rotation.md.", e);
             }
             catch (CryptographicException e)
             {
@@ -124,13 +142,9 @@ public class CertificateRepository : ICertificateRepository
                 continue;
             }
 
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-
-            // 一時ファイルは .tmp 拡張子にする。Crew と TTC が *.cer で読むので、書きかけを見せない
-            WriteAtomically(path, bytes, CerMode, PublicDirectory);
+            // 一時ファイルは .tmp 拡張子にする。Crew と TTC が *.cer で読むので、書きかけを見せない。
+            // 既存のファイルは消さずに、move で置き換える(消えている瞬間を作らない)
+            WriteAtomically(path, bytes, CerMode, PublicDirectory, overwrite: true);
             changes.Add("+" + name);
         }
 
@@ -147,6 +161,33 @@ public class CertificateRepository : ICertificateRepository
 
         DeleteStaleTemporaryFiles();
         return changes;
+    }
+
+    public bool IsPublished(CertificateInfo signingCertificate)
+    {
+        var path = Path.Combine(PublicDirectory, CerFileName(signingCertificate.Thumbprint));
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        using var certificate = Load(signingCertificate);
+        return File.ReadAllBytes(path).AsSpan().SequenceEqual(certificate.Export(X509ContentType.Cert));
+    }
+
+    public IReadOnlyList<string> FindUnexpectedPublicFiles()
+    {
+        if (!Directory.Exists(PublicDirectory))
+        {
+            return [];
+        }
+
+        return Directory.EnumerateFiles(PublicDirectory)
+            .Select(Path.GetFileName)
+            .Where(n => n is not null && !n.EndsWith(".cer", StringComparison.OrdinalIgnoreCase) &&
+                        !n.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.Ordinal)
+            .ToList()!;
     }
 
     public static string CerFileName(string thumbprint) => $"server-signing-{thumbprint}.cer";
@@ -274,9 +315,10 @@ public class CertificateRepository : ICertificateRepository
 
     /// <summary>
     /// 同じディレクトリに一時ファイル(.tmp)を書いてから、move で置く。
-    /// 読み手は、完成したファイルか、無いかのどちらかしか見ない。置く先が既にあれば失敗する(上書きしない)。
+    /// 読み手は、完成したファイルか、無いかのどちらかしか見ない。overwrite が false なら、置く先が既にあれば失敗する。
     /// </summary>
-    private static void WriteAtomically(string path, byte[] bytes, UnixFileMode mode, string temporaryDirectory)
+    private static void WriteAtomically(string path, byte[] bytes, UnixFileMode mode, string temporaryDirectory,
+        bool overwrite = false)
     {
         var temporaryPath = Path.Combine(temporaryDirectory, $".{Guid.NewGuid():N}.tmp");
         try
@@ -298,7 +340,7 @@ public class CertificateRepository : ICertificateRepository
                 File.SetUnixFileMode(temporaryPath, mode);
             }
 
-            File.Move(temporaryPath, path, overwrite: false);
+            File.Move(temporaryPath, path, overwrite);
         }
         catch
         {

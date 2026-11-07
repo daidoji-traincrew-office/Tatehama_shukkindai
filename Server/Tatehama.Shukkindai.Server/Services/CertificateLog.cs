@@ -19,6 +19,8 @@ internal static partial class CertificateLog
     public const int StartupCertificatesLoadedId = 7109;
     public const int NoValidSigningCertificateId = 7110;
     public const int PublicCertificatesChangedId = 7111;
+    public const int CertificateDirectoryIsRelativeId = 7112;
+    public const int UnexpectedPublicFileId = 7113;
 
     /// <summary>用途の表示名(ログの <c>CertificatePurpose</c>)。ディレクトリ名と同じ。</summary>
     public static string Name(CertificatePurpose purpose) => CertificateRotationPolicy.RuleFor(purpose).DirectoryName;
@@ -109,4 +111,12 @@ internal static partial class CertificateLog
     [LoggerMessage(EventId = PublicCertificatesChangedId, EventName = "PublicCertificatesChanged", Level = LogLevel.Information,
         Message = "Public certificate files changed: {Changes}.")]
     public static partial void PublicCertificatesChanged(ILogger logger, string changes);
+
+    [LoggerMessage(EventId = CertificateDirectoryIsRelativeId, EventName = "CertificateDirectoryIsRelative", Level = LogLevel.Warning,
+        Message = "Authentication:CertificateDirectory is a relative path ({ConfiguredPath}); resolved to {ResolvedPath}. Use an absolute path in production so that a different working directory cannot silently point to an empty directory.")]
+    public static partial void CertificateDirectoryIsRelative(ILogger logger, string configuredPath, string resolvedPath);
+
+    [LoggerMessage(EventId = UnexpectedPublicFileId, EventName = "UnexpectedPublicFile", Level = LogLevel.Warning,
+        Message = "Unexpected file {FileName} in the public certificate directory. Only .cer files belong there; a .pfx contains a private key and must be removed.")]
+    public static partial void UnexpectedPublicFile(ILogger logger, string fileName);
 }

@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Tatehama.Shukkindai.Server.Configuration;
 using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Time.Testing;
 using Tatehama.Shukkindai.Server.Models;
@@ -24,8 +26,14 @@ public sealed class CertificateServiceTest : IDisposable
 
     public void Dispose() => _directory.Dispose();
 
+    private IOptions<AuthenticationSettings> Settings(bool allowBootstrap = true) => Options.Create(new AuthenticationSettings
+    {
+        CertificateDirectory = _directory.Path,
+        AllowCertificateBootstrap = allowBootstrap,
+    });
+
     private CertificateService CreateService(ICertificateRepository? repository = null) =>
-        new(repository ?? _repository, _time, _logger);
+        new(repository ?? _repository, _time, Settings(), _logger);
 
     private CertificateInfo Seed(CertificatePurpose purpose, double notBeforeDays, double notAfterDays) =>
         _repository.Create(purpose, Start.AddDays(notBeforeDays), Start.AddDays(notAfterDays));
@@ -63,7 +71,8 @@ public sealed class CertificateServiceTest : IDisposable
 
         Assert.Equal(["server-signing-" + set.Get(CertificatePurpose.ServerSigning)[0].Thumbprint + ".cer"], PublicCers());
         Assert.Equal(4, Records(CertificateLog.CertificateCreatedId).Count());
-        Assert.All(Records(CertificateLog.CertificateCreatedId), r => Assert.Equal(LogLevel.Information, r.Level));
+        // 初回の生成は、意図したものか確かめられるよう Warning
+        Assert.All(Records(CertificateLog.CertificateCreatedId), r => Assert.Equal(LogLevel.Warning, r.Level));
     }
 
     [Fact]
@@ -145,7 +154,8 @@ public sealed class CertificateServiceTest : IDisposable
 
         // 期限切れは登録しない
         Assert.Equal([valid.Thumbprint], set.Get(CertificatePurpose.ServerSigning).Select(c => c.Thumbprint));
-        Assert.DoesNotContain(PublicCers(), n => n.Contains(expired.Thumbprint)); // 保持期間内(7日)ではないので消える
+        // 期限切れから 10 日だが、起動直後なので消さない(直前まで使っていたかもしれない)。pfx も .cer も残る
+        Assert.Contains(PublicCers(), n => n.Contains(expired.Thumbprint));
     }
 
     [Fact]
@@ -168,9 +178,9 @@ public sealed class CertificateServiceTest : IDisposable
     {
         // 別々のプロセスのつもり(別の Service と Repository)で同時に起動する
         var results = await Task.WhenAll(
-            Task.Run(() => new CertificateService(new CertificateRepository(_directory.Path), _time,
+            Task.Run(() => new CertificateService(new CertificateRepository(_directory.Path), _time, Settings(),
                 new FakeLogger<CertificateService>()).GetStartupCertificates(), TestContext.Current.CancellationToken),
-            Task.Run(() => new CertificateService(new CertificateRepository(_directory.Path), _time,
+            Task.Run(() => new CertificateService(new CertificateRepository(_directory.Path), _time, Settings(),
                 new FakeLogger<CertificateService>()).GetStartupCertificates(), TestContext.Current.CancellationToken));
 
         foreach (var directory in new[] { "server-signing", "server-encryption", "client-signing", "client-encryption" })
@@ -284,9 +294,12 @@ public sealed class CertificateServiceTest : IDisposable
         Assert.Equal(2, PfxCount("server-signing"));
         Assert.Contains($"server-signing-{old.Thumbprint}.cer", PublicCers());
 
-        // 再起動すると(新しいプロセス)、消える。.cer も一緒に消える
+        // 再起動した(新しいプロセス)直後は、直前まで使っていた鍵を消さない。起動から保持期間がたつと消え、.cer も一緒に消える
         var restarted = CreateService();
         restarted.GetStartupCertificates();
+        Assert.Equal(2, PfxCount("server-signing"));
+        _time.Advance(TimeSpan.FromDays(7.5));
+        restarted.Maintain();
 
         Assert.Equal(1, PfxCount("server-signing"));
         Assert.Equal([$"server-signing-{next.Thumbprint}.cer"], PublicCers());
@@ -321,7 +334,7 @@ public sealed class CertificateServiceTest : IDisposable
         SeedValidSetExceptSigning();
         Seed(CertificatePurpose.ServerSigning, -10, 700);
         var failing = new FailingRepository(_repository, CertificatePurpose.ClientSigning);
-        var failingService = new CertificateService(failing, _time, _logger);
+        var failingService = new CertificateService(failing, _time, Settings(), _logger);
         failingService.GetStartupCertificates(); // 起動時の失敗は、用途のログを出して続ける(証明書は有効なものがある)
         _logger.Collector.Clear();
         _time.Advance(TimeSpan.FromDays(650)); // 全部の用途が更新時期に入る(署名の鍵は残り 50 日)
@@ -387,7 +400,186 @@ public sealed class CertificateServiceTest : IDisposable
             r => r.Message!.Contains("server-signing")).Level);
     }
 
-    private sealed class FailingRepository(ICertificateRepository inner, CertificatePurpose failingPurpose)
+    // --- 初回の生成の許可(AllowCertificateBootstrap) ---
+
+    [Fact]
+    public void GetStartupCertificates_EmptyDirectoryAndBootstrapNotAllowed_ThrowsAndCreatesNothing()
+    {
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => service.GetStartupCertificates());
+
+        Assert.Contains("AllowCertificateBootstrap", exception.Message);
+        Assert.Contains("マウント漏れ", exception.Message);
+        Assert.Contains(_directory.Path, exception.Message);
+        Assert.Contains("certificate-rotation.md", exception.Message);
+        Assert.False(Directory.Exists(Path.Combine(_directory.Path, "server-signing")));
+    }
+
+    [Fact]
+    public void GetStartupCertificates_OnePurposeDirectoryEmptyAndBootstrapNotAllowed_ThrowsWithoutDeletingAnything()
+    {
+        var signing = Seed(CertificatePurpose.ServerSigning, -10, 700);
+
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+
+        Assert.Throws<InvalidOperationException>(() => service.GetStartupCertificates());
+        Assert.Equal(1, PfxCount("server-signing"));
+        Assert.True(File.Exists(signing.Path));
+    }
+
+    [Fact]
+    public void GetStartupCertificates_ExistingCertificatesAndBootstrapNotAllowed_StartsAndStillCreatesNextKey()
+    {
+        SeedValidSetExceptSigning();
+        Seed(CertificatePurpose.ServerSigning, -580, 150);
+
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+        service.GetStartupCertificates();
+
+        Assert.Equal(2, PfxCount("server-signing"));
+    }
+
+    [Fact]
+    public void GetStartupCertificates_BootstrapAllowed_LogsWarningForCreation()
+    {
+        CreateService().GetStartupCertificates();
+
+        Assert.Equal(4, Records(CertificateLog.CertificateCreatedId).Count(r => r.Level == LogLevel.Warning));
+    }
+
+    [Fact]
+    public void GetStartupCertificates_RelativeDirectory_LogsWarningWithResolvedPath()
+    {
+        var relative = new AuthenticationSettings { CertificateDirectory = "cert-relative-ut", AllowCertificateBootstrap = true };
+        var service = new CertificateService(new CertificateRepository(_directory.Path), _time, Options.Create(relative), _logger);
+
+        service.GetStartupCertificates();
+
+        var warning = Assert.Single(Records(CertificateLog.CertificateDirectoryIsRelativeId));
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Contains(Path.GetFullPath("cert-relative-ut"), warning.Message);
+    }
+
+    // --- public/ の不変条件 ---
+
+    [Fact]
+    public void GetStartupCertificates_PublicDirectoryNotWritable_ThrowsAndDoesNotStart()
+    {
+        SeedValidSetExceptSigning();
+        Seed(CertificatePurpose.ServerSigning, -10, 700);
+        var failing = new FailingRepository(_repository, CertificatePurpose.ClientSigning, failSyncPublic: true);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            new CertificateService(failing, _time, Settings(), _logger).GetStartupCertificates());
+
+        Assert.Contains("起動を中止", exception.Message);
+        Assert.Contains("read-only file system", exception.Message);
+        Assert.DoesNotContain("すべて期限切れ", exception.Message);
+    }
+
+    [Fact]
+    public void GetStartupCertificates_SigningKeyNotPublished_IsNotUsedForSigning()
+    {
+        SeedValidSetExceptSigning();
+        var published = Seed(CertificatePurpose.ServerSigning, -600, 100);
+        var unpublished = Seed(CertificatePurpose.ServerSigning, -10, 700);
+        // .cer を書けない状態を再現する(SyncPublic が何もしない)
+        var noPublish = new NoPublishRepository(_repository, published);
+
+        var set = new CertificateService(noPublish, _time, Settings(), _logger).GetStartupCertificates();
+
+        Assert.Equal([published.Thumbprint], set.Get(CertificatePurpose.ServerSigning).Select(c => c.Thumbprint));
+        Assert.DoesNotContain(unpublished.Thumbprint, set.Get(CertificatePurpose.ServerSigning).Select(c => c.Thumbprint));
+    }
+
+    [Fact]
+    public void GetStartupCertificates_NoSigningKeyIsPublished_ThrowsWithPublicMessage()
+    {
+        SeedValidSetExceptSigning();
+        Seed(CertificatePurpose.ServerSigning, -10, 700);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            new CertificateService(new NoPublishRepository(_repository, null), _time, Settings(), _logger)
+                .GetStartupCertificates());
+
+        Assert.Contains("cert/public/", exception.Message);
+        Assert.DoesNotContain("すべて期限切れ", exception.Message);
+    }
+
+    // --- 再起動を怠ったあとの起動 ---
+
+    [Fact]
+    public void GetStartupCertificates_RestartedEightDaysAfterSigningKeyExpired_KeepsOldKeyAndItsCer()
+    {
+        SeedValidSetExceptSigning();
+        var old = Seed(CertificatePurpose.ServerSigning, -600, -8);
+        var current = Seed(CertificatePurpose.ServerSigning, -100, 630);
+
+        var service = CreateService();
+        service.GetStartupCertificates();
+
+        // 直前まで使っていた鍵は、すぐには消さない(直前に発行したトークンを、Crew/TTC が検証できなくなるため)
+        Assert.Equal(2, PfxCount("server-signing"));
+        Assert.Contains($"server-signing-{old.Thumbprint}.cer", PublicCers());
+        Assert.Contains($"server-signing-{current.Thumbprint}.cer", PublicCers());
+
+        // 起動から保持期間(7 日)がたってから、定期実行で消える
+        _time.Advance(TimeSpan.FromDays(7.5));
+        service.Maintain();
+
+        Assert.Equal(1, PfxCount("server-signing"));
+        Assert.Equal([$"server-signing-{current.Thumbprint}.cer"], PublicCers());
+    }
+
+    [Fact]
+    public void GetStartupCertificates_RestartedAfterEncryptionKeyExpiredBeyondRetention_KeepsOldEncryptionKey()
+    {
+        Seed(CertificatePurpose.ServerSigning, -10, 700);
+        Seed(CertificatePurpose.ClientSigning, -10, 700);
+        Seed(CertificatePurpose.ClientEncryption, -10, 700);
+        var old = Seed(CertificatePurpose.ServerEncryption, -740, -15); // NotAfter + 14 日を過ぎている
+        var current = Seed(CertificatePurpose.ServerEncryption, -20, 710);
+
+        var set = CreateService().GetStartupCertificates();
+
+        Assert.Equal(new[] { old.Thumbprint, current.Thumbprint }.Order(),
+            set.Get(CertificatePurpose.ServerEncryption).Select(c => c.Thumbprint).Order());
+    }
+
+    // --- 時計 ---
+
+    [Fact]
+    public void GetStartupCertificates_ClockFarAhead_StopsWithoutDeletingOrCreatingAnything()
+    {
+        var service = CreateService();
+        service.GetStartupCertificates(); // 4 用途を作る
+        var before = Directory.GetFiles(_directory.Path, "*.pfx", SearchOption.AllDirectories).Order().ToList();
+
+        _time.Advance(TimeSpan.FromDays(2000));
+        var exception = Assert.Throws<InvalidOperationException>(() => CreateService().GetStartupCertificates());
+
+        Assert.Contains("有効なサーバー署名証明書がありません", exception.Message);
+        Assert.Contains("何も作らず、何も消していません", exception.Message);
+        Assert.Equal(before, Directory.GetFiles(_directory.Path, "*.pfx", SearchOption.AllDirectories).Order().ToList());
+    }
+
+    [Fact]
+    public void GetStartupCertificates_ClockBehindExistingCertificates_StopsWithoutChangingAnything()
+    {
+        CreateService().GetStartupCertificates();
+        var before = Directory.GetFiles(_directory.Path, "*.pfx", SearchOption.AllDirectories).Order().ToList();
+
+        var past = new FakeTimeProvider(Start.AddDays(-30));
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            new CertificateService(_repository, past, Settings(), _logger).GetStartupCertificates());
+
+        Assert.Contains("時計", exception.Message);
+        Assert.Equal(before, Directory.GetFiles(_directory.Path, "*.pfx", SearchOption.AllDirectories).Order().ToList());
+    }
+
+    private sealed class FailingRepository(ICertificateRepository inner, CertificatePurpose failingPurpose,
+        bool failSyncPublic = false)
         : ICertificateRepository
     {
         public IReadOnlyList<CertificateInfo> GetAll(CertificatePurpose purpose) => inner.GetAll(purpose);
@@ -398,8 +590,28 @@ public sealed class CertificateServiceTest : IDisposable
             purpose == failingPurpose ? throw new IOException("disk full") : inner.Create(purpose, notBefore, notAfter);
 
         public void Delete(CertificateInfo certificate) => inner.Delete(certificate);
-        public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signing) => inner.SyncPublic(signing);
+        public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signing) =>
+            failSyncPublic ? throw new IOException("read-only file system") : inner.SyncPublic(signing);
+        public bool IsPublished(CertificateInfo c) => inner.IsPublished(c);
+        public IReadOnlyList<string> FindUnexpectedPublicFiles() => inner.FindUnexpectedPublicFiles();
         public T WithLock<T>(Func<T> action) => inner.WithLock(action);
         public IReadOnlyList<string> FindLoosePermissions() => inner.FindLoosePermissions();
+    }
+
+    /// <summary>public/ に何も書かない(書けない)状態を再現する。<paramref name="published"/> だけが公開済み。</summary>
+    private sealed class NoPublishRepository(ICertificateRepository inner, CertificateInfo? published) : ICertificateRepository
+    {
+        public IReadOnlyList<CertificateInfo> GetAll(CertificatePurpose purpose) => inner.GetAll(purpose);
+        public System.Security.Cryptography.X509Certificates.X509Certificate2 Load(CertificateInfo certificate) => inner.Load(certificate);
+
+        public CertificateInfo Create(CertificatePurpose purpose, DateTimeOffset notBefore, DateTimeOffset notAfter) =>
+            inner.Create(purpose, notBefore, notAfter);
+
+        public void Delete(CertificateInfo certificate) => inner.Delete(certificate);
+        public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signing) => [];
+        public bool IsPublished(CertificateInfo c) => published is not null && c.Thumbprint == published.Thumbprint;
+        public IReadOnlyList<string> FindUnexpectedPublicFiles() => [];
+        public T WithLock<T>(Func<T> action) => inner.WithLock(action);
+        public IReadOnlyList<string> FindLoosePermissions() => [];
     }
 }

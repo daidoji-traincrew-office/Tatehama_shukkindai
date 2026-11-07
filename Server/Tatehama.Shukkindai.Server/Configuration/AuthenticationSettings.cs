@@ -16,6 +16,13 @@ public sealed class AuthenticationSettings
     /// <summary>証明書(pfx と .cer)を置くディレクトリ。</summary>
     public string CertificateDirectory { get; set; } = "cert";
 
+    /// <summary>
+    /// true のときだけ、用途のディレクトリに pfx が 1 つも無い状態(初回)で、鍵を作って起動する。false(既定)なら起動を止める。
+    /// cert/ のマウント漏れで空のボリュームになったとき、黙って新しい署名鍵で起動し、Crew と TTC が全部 401 になるのを防ぐ。
+    /// 初回のデプロイでだけ true にする(Docs/certificate-rotation.md)。次の鍵の自動生成には関係しない。
+    /// </summary>
+    public bool AllowCertificateBootstrap { get; set; }
+
     public Uri IssuerUri => new(Issuer!, UriKind.Absolute);
 }
 

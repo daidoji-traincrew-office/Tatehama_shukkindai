@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.AspNetCore.Hosting;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Security.Cryptography.X509Certificates;
@@ -269,5 +270,111 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         parameters.LifetimeValidator = null;
         var beforeResult = await handler.ValidateTokenAsync(before, parameters);
         Assert.True(beforeResult.IsValid, beforeResult.Exception?.Message);
+    }
+
+    [Fact]
+    public void Startup_DirectoryEmptyAndBootstrapNotAllowed_StopsStartupAndCreatesNothing()
+    {
+        // cert/ のマウント漏れで空のボリュームになったときに、黙って新しい署名鍵で起動しない
+        using var env = new CertificateTestEnvironment();
+        using var factory = env.CreateFactory(fixture, b => b.UseSetting("Authentication:AllowCertificateBootstrap", "false"));
+
+        var exception = Record.Exception(() => factory.CreateIdpClient());
+
+        Assert.NotNull(exception);
+        var text = exception.ToString();
+        Assert.Contains("AllowCertificateBootstrap", text);
+        Assert.Contains(env.Directory, text);
+        Assert.False(Directory.Exists(Path.Combine(env.Directory, "server-signing")));
+    }
+
+    [Fact]
+    public void Startup_ExistingCertificatesAndBootstrapNotAllowed_Starts()
+    {
+        using var env = new CertificateTestEnvironment();
+        foreach (var purpose in Enum.GetValues<CertificatePurpose>())
+        {
+            env.Seed(purpose, -10, 700);
+        }
+
+        using var factory = env.CreateFactory(fixture, b => b.UseSetting("Authentication:AllowCertificateBootstrap", "false"));
+
+        factory.CreateIdpClient();
+        Assert.Single(env.PublicThumbprints());
+    }
+
+    [Fact]
+    public void Startup_PublicDirectoryCannotBeWritten_StopsStartup()
+    {
+        // public が通常のファイルになっていて、ディレクトリを作れない(書けない状態の再現)
+        using var env = new CertificateTestEnvironment();
+        foreach (var purpose in Enum.GetValues<CertificatePurpose>())
+        {
+            env.Seed(purpose, -10, 700);
+        }
+
+        File.WriteAllText(env.PublicDirectory, "not a directory");
+        using var factory = env.CreateFactory(fixture);
+
+        var exception = Record.Exception(() => factory.CreateIdpClient());
+
+        Assert.NotNull(exception);
+        Assert.Contains("起動を中止", exception.ToString());
+        Assert.DoesNotContain("すべて期限切れ", exception.ToString());
+    }
+
+    [Fact]
+    public async Task Restart_EightDaysAfterSigningKeyExpired_StillAcceptsTokensSignedWithThePreviousKey()
+    {
+        using var env = new CertificateTestEnvironment();
+        var old = env.Seed(CertificatePurpose.ServerSigning, -700, 1);
+        var next = env.Seed(CertificatePurpose.ServerSigning, -10, 700);
+        string token;
+        using (var factory = env.CreateFactory(fixture))
+        {
+            using var client = factory.CreateIdpClient();
+            var id = NewDiscordId();
+            fixture.DiscordRepository.SetMember(id, "judy");
+            token = (await Login(client, id)).AccessToken;
+            Assert.Equal(next.Thumbprint, DecodePart(token, 0).GetProperty("kid").GetString());
+        }
+
+        // 再起動を怠って、期限の 8 日後に再起動する。直前まで使っていた鍵(old)を、起動の最初に消さない
+        env.Time.Advance(TimeSpan.FromDays(9));
+        using (var factory = env.CreateFactory(fixture))
+        {
+            using var client = factory.CreateIdpClient();
+            Assert.True(File.Exists(old.Path));
+            Assert.Equal(new[] { old.Thumbprint, next.Thumbprint }.Order(), env.PublicThumbprints());
+        }
+    }
+
+    [Fact]
+    public async Task Restart_AfterRunningPastEncryptionKeyRetention_RefreshWithTokenEncryptedByTheRunningProcessStillWorks()
+    {
+        using var env = new CertificateTestEnvironment();
+        var old = env.Seed(CertificatePurpose.ServerEncryption, -600, 100);
+        var id = NewDiscordId();
+        fixture.DiscordRepository.SetMember(id, "kim");
+        string refresh;
+        using (var factory = env.CreateFactory(fixture))
+        {
+            using var client = factory.CreateIdpClient();
+            env.Time.Advance(TimeSpan.FromDays(95));
+            factory.Services.GetRequiredService<ICertificateService>().Maintain(); // 新しい暗号化鍵が作られる(使うのは再起動のとき)
+            // 再起動を怠って、old の期限から 20 日(NotAfter + 保持期間の 14 日を超えた)まで動かし続ける。
+            // 動いているプロセスは old で暗号化する
+            env.Time.Advance(TimeSpan.FromDays(25));
+            refresh = (await Login(client, id)).RefreshToken!;
+        }
+
+        // 再起動の直後に、old を消さない(消すと、直前に発行した refresh token が invalid_grant になる)
+        using (var factory = env.CreateFactory(fixture))
+        {
+            using var client = factory.CreateIdpClient();
+            Assert.True(File.Exists(old.Path));
+            var refreshed = await ReadToken(await Refresh(client, refresh));
+            Assert.False(string.IsNullOrEmpty(refreshed.RefreshToken));
+        }
     }
 }

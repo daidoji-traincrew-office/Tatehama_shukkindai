@@ -64,7 +64,7 @@ public class Program
             ConfigureCertificateServices(builder);
         }
 
-        if (builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] != null)
+        if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
         {
             ConfigureOpenTelemetryService(builder);
         }

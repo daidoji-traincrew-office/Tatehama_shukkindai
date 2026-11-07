@@ -285,4 +285,83 @@ public sealed class CertificateRepositoryTest : IDisposable
         Assert.Contains(loose, l => l.StartsWith(info.Path));
         Assert.Contains(loose, l => l.StartsWith(PurposeDirectory("server-signing")));
     }
+
+    [Fact]
+    public async Task SyncPublic_ReplacingExistingCer_NeverLeavesTheFileMissing()
+    {
+        var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
+        _repository.SyncPublic([info]);
+        var cerPath = Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer");
+        File.WriteAllBytes(cerPath, [1, 2, 3]);
+        var missing = 0;
+        using var stop = new CancellationTokenSource();
+        var watcher = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                if (!File.Exists(cerPath))
+                {
+                    Interlocked.Increment(ref missing);
+                }
+            }
+        }, TestContext.Current.CancellationToken);
+
+        for (var i = 0; i < 20; i++)
+        {
+            File.WriteAllBytes(cerPath, [1, 2, 3]);
+            _repository.SyncPublic([info]);
+        }
+
+        stop.Cancel();
+        await watcher;
+        Assert.Equal(0, missing);
+    }
+
+    [Fact]
+    public void IsPublished_CerWithSameContent_IsTrueOtherwiseFalse()
+    {
+        var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
+        Assert.False(_repository.IsPublished(info));
+
+        _repository.SyncPublic([info]);
+        Assert.True(_repository.IsPublished(info));
+
+        File.WriteAllBytes(Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer"), [1]);
+        Assert.False(_repository.IsPublished(info));
+    }
+
+    [Fact]
+    public void FindUnexpectedPublicFiles_PfxAndOtherFiles_AreReportedButCerAndTmpAreNot()
+    {
+        var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
+        _repository.SyncPublic([info]);
+        File.WriteAllText(Path.Combine(PublicDirectory, "leaked.pfx"), "x");
+        File.WriteAllText(Path.Combine(PublicDirectory, "notes.txt"), "x");
+        File.WriteAllText(Path.Combine(PublicDirectory, ".abc.tmp"), "x");
+
+        Assert.Equal(["leaked.pfx", "notes.txt"], _repository.FindUnexpectedPublicFiles());
+    }
+
+    [Fact]
+    public void GetAll_OnUnixUnreadableFile_ThrowsWithReadableMessage()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
+        File.SetUnixFileMode(info.Path, UnixFileMode.None);
+        try
+        {
+            var exception = Assert.Throws<InvalidDataException>(() => _repository.GetAll(CertificatePurpose.ServerSigning));
+
+            Assert.Contains("permission denied", exception.Message);
+            Assert.Contains("1654", exception.Message);
+        }
+        finally
+        {
+            File.SetUnixFileMode(info.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
 }

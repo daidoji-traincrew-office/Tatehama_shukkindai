@@ -10,7 +10,7 @@ namespace Tatehama.Shukkindai.Server.HostedService;
 /// 起動時に証明書を読み込み(足りなければ生成)、24 時間ごとにローテーションと状態のログ・メトリクスの更新を行う。
 /// 中身は <see cref="ICertificateService"/> にある。
 /// </summary>
-public class CertificateRotationHostedService(
+public sealed class CertificateRotationHostedService(
     ICertificateService certificateService,
     IOptionsMonitor<OpenIddictServerOptions> serverOptions,
     IOptionsMonitor<OpenIddictClientOptions> clientOptions,

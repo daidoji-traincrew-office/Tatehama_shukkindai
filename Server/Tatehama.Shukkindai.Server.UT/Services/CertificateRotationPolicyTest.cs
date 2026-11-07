@@ -6,6 +6,8 @@ namespace Tatehama.Shukkindai.Server.UT.Services;
 public class CertificateRotationPolicyTest
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 7, 0, 0, 0, TimeSpan.Zero);
+    /// <summary>プロセスは十分前から動いている(起動直後の削除猶予に引っかからない)。</summary>
+    private static readonly DateTimeOffset LongAgo = Now.AddDays(-365);
     private static readonly IReadOnlySet<string> NothingInUse = new HashSet<string>();
 
     private static CertificateInfo Cert(CertificatePurpose purpose, string thumbprint, double notBeforeDays,
@@ -20,7 +22,7 @@ public class CertificateRotationPolicyTest
     [Fact]
     public void Plan_SigningDirectoryEmpty_CreatesImmediatelyValidCertificate()
     {
-        var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning, [], NothingInUse, Now);
+        var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning, [], NothingInUse, Now, LongAgo);
 
         var create = Assert.IsType<CertificateToCreate>(plan.Create);
         Assert.True(create.Initial);
@@ -41,7 +43,7 @@ public class CertificateRotationPolicyTest
         int remainingDays, int? expectedNotBeforeDays, bool shortNotice)
     {
         var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning,
-            [Signing("OLD", -600, remainingDays)], NothingInUse, Now);
+            [Signing("OLD", -600, remainingDays)], NothingInUse, Now, LongAgo);
 
         if (expectedNotBeforeDays is null)
         {
@@ -60,7 +62,7 @@ public class CertificateRotationPolicyTest
     public void Plan_SigningLessThanOneDayLeft_CreatesImmediatelyValidKey()
     {
         var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning,
-            [Signing("OLD", -600, 0.5)], NothingInUse, Now);
+            [Signing("OLD", -600, 0.5)], NothingInUse, Now, LongAgo);
 
         // E-1日 が過去になる。両方が無効な隙間を作らないよう、すぐ有効にする
         Assert.Equal(Now.AddMinutes(-5), Assert.IsType<CertificateToCreate>(plan.Create).NotBefore);
@@ -70,7 +72,7 @@ public class CertificateRotationPolicyTest
     public void Plan_SigningNextKeyAlreadyExists_DoesNothing()
     {
         var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning,
-            [Signing("OLD", -600, 100), Signing("NEXT", 40, 770)], NothingInUse, Now);
+            [Signing("OLD", -600, 100), Signing("NEXT", 40, 770)], NothingInUse, Now, LongAgo);
 
         Assert.Null(plan.Create);
         Assert.Empty(plan.Delete);
@@ -84,7 +86,7 @@ public class CertificateRotationPolicyTest
     [InlineData(CertificatePurpose.ClientEncryption)]
     public void Plan_NonSigningDirectoryEmpty_CreatesImmediatelyValidCertificate(CertificatePurpose purpose)
     {
-        var plan = CertificateRotationPolicy.Plan(purpose, [], NothingInUse, Now);
+        var plan = CertificateRotationPolicy.Plan(purpose, [], NothingInUse, Now, LongAgo);
 
         var create = Assert.IsType<CertificateToCreate>(plan.Create);
         Assert.True(create.Initial);
@@ -99,7 +101,7 @@ public class CertificateRotationPolicyTest
     public void Plan_NonSigning_CreatesImmediatelyValidCertificateWhenSixtyDaysLeft(double remainingDays, bool creates)
     {
         var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerEncryption,
-            [Cert(CertificatePurpose.ServerEncryption, "OLD", -600, remainingDays)], NothingInUse, Now);
+            [Cert(CertificatePurpose.ServerEncryption, "OLD", -600, remainingDays)], NothingInUse, Now, LongAgo);
 
         if (!creates)
         {
@@ -132,7 +134,7 @@ public class CertificateRotationPolicyTest
             Cert(purpose, "NEW", -100, 630),
         };
 
-        var plan = CertificateRotationPolicy.Plan(purpose, certificates, NothingInUse, Now);
+        var plan = CertificateRotationPolicy.Plan(purpose, certificates, NothingInUse, Now, LongAgo);
 
         Assert.Equal(deleted ? ["OLD"] : [], plan.Delete.Select(c => c.Thumbprint));
     }
@@ -147,7 +149,7 @@ public class CertificateRotationPolicyTest
         };
 
         var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning, certificates,
-            new HashSet<string> { "OLD" }, Now);
+            new HashSet<string> { "OLD" }, Now, LongAgo);
 
         Assert.Empty(plan.Delete);
     }
@@ -157,7 +159,7 @@ public class CertificateRotationPolicyTest
     {
         // 全部が期限切れで保持期間も過ぎている。消すと空になり、次の起動が「初回」扱いになってしまう
         var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning,
-            [Signing("A", -900, -100), Signing("B", -800, -50)], NothingInUse, Now);
+            [Signing("A", -900, -100), Signing("B", -800, -50)], NothingInUse, Now, LongAgo);
 
         Assert.Empty(plan.Delete);
         Assert.Null(plan.Create);
@@ -167,7 +169,7 @@ public class CertificateRotationPolicyTest
     public void Plan_NonSigningAllExpiredAndRecreated_DeletesOldOnes()
     {
         var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerEncryption,
-            [Cert(CertificatePurpose.ServerEncryption, "A", -900, -100)], NothingInUse, Now);
+            [Cert(CertificatePurpose.ServerEncryption, "A", -900, -100)], NothingInUse, Now, LongAgo);
 
         Assert.NotNull(plan.Create);
         Assert.Equal(["A"], plan.Delete.Select(c => c.Thumbprint));
@@ -224,5 +226,44 @@ public class CertificateRotationPolicyTest
             new HashSet<string> { "OLD" }, "OLD");
 
         Assert.False(CertificateRotationPolicy.IsRestartRequired(status, Now.AddDays(101)));
+    }
+
+    [Fact]
+    public void Plan_DirectoryEmptyAndBootstrapNotAllowed_DoesNotCreate()
+    {
+        foreach (var purpose in Enum.GetValues<CertificatePurpose>())
+        {
+            var plan = CertificateRotationPolicy.Plan(purpose, [], NothingInUse, Now, Now, allowBootstrap: false);
+
+            Assert.True(plan.BootstrapDenied);
+            Assert.Null(plan.Create);
+        }
+    }
+
+    [Fact]
+    public void Plan_NextKeyNeededAndBootstrapNotAllowed_StillCreatesNextKey()
+    {
+        // 初回の生成の許可は、次の鍵の自動生成には関係しない
+        var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning,
+            [Signing("OLD", -580, 150)], NothingInUse, Now, LongAgo, allowBootstrap: false);
+
+        Assert.False(plan.BootstrapDenied);
+        Assert.NotNull(plan.Create);
+    }
+
+    [Theory]
+    // 期限切れから 8 日(保持期間 7 日を超えている)。プロセスの起動からの経過日数 → 消すか
+    [InlineData(0.0, false)]  // 再起動した直後は、直前まで使っていた鍵を消さない
+    [InlineData(6.9, false)]
+    [InlineData(7.1, true)]
+    public void Plan_ExpiredKeyUsedUntilJustBeforeRestart_IsKeptUntilRetentionPassesSinceProcessStart(
+        double processRunningDays, bool deleted)
+    {
+        var certificates = new[] { Signing("OLD", -900, -8), Signing("NEW", -100, 630) };
+
+        var plan = CertificateRotationPolicy.Plan(CertificatePurpose.ServerSigning, certificates, NothingInUse, Now,
+            processStart: Now.AddDays(-processRunningDays));
+
+        Assert.Equal(deleted ? ["OLD"] : [], plan.Delete.Select(c => c.Thumbprint));
     }
 }

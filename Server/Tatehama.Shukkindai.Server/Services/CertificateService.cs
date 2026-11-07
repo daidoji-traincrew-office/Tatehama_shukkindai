@@ -1,4 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.Options;
+using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Repositories.Certificate;
 
@@ -23,15 +25,20 @@ public interface ICertificateService
     void Maintain();
 }
 
-public class CertificateService(
+public sealed class CertificateService(
     ICertificateRepository repository,
     TimeProvider timeProvider,
+    IOptions<AuthenticationSettings> settings,
     ILogger<CertificateService> logger) : ICertificateService
 {
     private static readonly CertificatePurpose[] Purposes = Enum.GetValues<CertificatePurpose>();
 
+    /// <summary>時計が過去に戻った/大きくずれたとみなす幅(非署名の既存の証明書の NotBefore が、今よりこれ以上未来)。</summary>
+    private static readonly TimeSpan ClockSanityMargin = TimeSpan.FromDays(1);
+
     private readonly object _gate = new();
     private CertificateSet? _startup;
+    private DateTimeOffset _processStart;
     private readonly Dictionary<CertificatePurpose, HashSet<string>> _inUse = new();
     private readonly Dictionary<CertificatePurpose, string> _inUseActive = new();
     private CertificateStatus _status = CertificateStatus.Empty;
@@ -52,29 +59,56 @@ public class CertificateService(
         }
     }
 
+    /// <summary>ローテーション中に起きた失敗(用途ごとの失敗は続行し、起動時の判断材料にする)。</summary>
+    private sealed record RotationOutcome(bool Success, Exception? Failure, bool LockOrPublicFailed);
+
     private CertificateSet LoadStartupCertificates()
     {
         var now = timeProvider.GetUtcNow();
-        var failed = !RotateAll(now);
+        _processStart = now;
+        var configured = settings.Value.CertificateDirectory;
+        if (!Path.IsPathRooted(configured))
+        {
+            CertificateLog.CertificateDirectoryIsRelative(logger, configured, Path.GetFullPath(configured));
+        }
+
+        // 1. 何も変えずに確かめる(止めるときは、何も作らず、何も消さない)
+        PreflightChecks(now);
+
+        // 2. ローテーション(足りなければ生成。保持期間を過ぎたものの削除)と、public/ の同期
+        var outcome = RotateAll(now);
+        if (outcome.LockOrPublicFailed)
+        {
+            throw new InvalidOperationException(
+                $"証明書のディレクトリ({Path.GetFullPath(configured)})を更新できません(ロックが取れない、public/ に .cer を書けない、など)。" +
+                "Crew と TTC が一度も見ていない鍵で署名しないよう、起動を中止します。" +
+                $" 原因: {outcome.Failure?.Message} 手順書: Docs/certificate-rotation.md", outcome.Failure);
+        }
 
         var all = Purposes.ToDictionary(p => p, repository.GetAll);
 
-        // 動かせない状態は、起動を止める(黙って作り直して起動することはしない)
-        if (CertificateRotationPolicy.SelectActive(all[CertificatePurpose.ServerSigning], now) is null)
+        // 3. 動かせない状態は、起動を止める(黙って作り直して起動することはしない)。原因は実際のものを書く
+        var cause = outcome.Failure is null ? string.Empty : $" 直前の失敗: {outcome.Failure.Message}";
+        // 署名は、public/ に同じ内容の .cer がある鍵だけを候補にする(Crew と TTC が一度も見ていない鍵では署名しない)
+        var signingCandidates = all[CertificatePurpose.ServerSigning]
+            .Where(c => c.NotAfter >= now && repository.IsPublished(c)).ToList();
+        if (CertificateRotationPolicy.SelectActive(signingCandidates, now) is null)
         {
             CertificateLog.NoValidSigningCertificate(logger);
-            throw new InvalidOperationException(
-                "有効なサーバー署名証明書がありません(すべて期限切れ、またはすべて NotBefore が未来です)。" +
-                "起動を中止します。Docs/certificate-rotation.md の「全部期限切れで起動しないとき」を参照してください。" +
-                $" 証明書: {Describe(all[CertificatePurpose.ServerSigning])}");
+            var unpublished = all[CertificatePurpose.ServerSigning]
+                .Where(c => c.NotAfter >= now && CertificateRotationPolicy.IsValidAt(c, now) && !repository.IsPublished(c)).ToList();
+            throw new InvalidOperationException(unpublished.Count > 0
+                ? "有効なサーバー署名証明書はありますが、cert/public/ に同じ内容の .cer がありません。" +
+                  $"Crew と TTC が見ていない鍵では署名しないため、起動を中止します。{cause} Docs/certificate-rotation.md を参照してください。"
+                : "有効なサーバー署名証明書がありません(すべて期限切れ、またはすべて NotBefore が未来です)。" +
+                  $"起動を中止します。{cause} Docs/certificate-rotation.md の「全部期限切れで起動しないとき」を参照してください。" +
+                  $" 証明書: {Describe(all[CertificatePurpose.ServerSigning])}");
         }
 
         if (CertificateRotationPolicy.SelectActive(all[CertificatePurpose.ServerEncryption], now) is null)
         {
             throw new InvalidOperationException(
-                "有効なサーバー暗号化証明書がありません。起動を中止します。" +
-                "Docs/certificate-rotation.md を参照してください。" +
-                (failed ? " 証明書の生成に失敗しています。直前のエラーログを確認してください。" : string.Empty));
+                $"有効なサーバー暗号化証明書がありません。起動を中止します。{cause} Docs/certificate-rotation.md を参照してください。");
         }
 
         foreach (var purpose in new[] { CertificatePurpose.ClientSigning, CertificatePurpose.ClientEncryption })
@@ -82,18 +116,16 @@ public class CertificateService(
             if (all[purpose].Count == 0)
             {
                 throw new InvalidOperationException(
-                    $"{CertificateLog.Name(purpose)} の証明書がありません。起動を中止します。Docs/certificate-rotation.md を参照してください。");
+                    $"{CertificateLog.Name(purpose)} の証明書がありません。起動を中止します。{cause} Docs/certificate-rotation.md を参照してください。");
             }
         }
 
         var loaded = new Dictionary<CertificatePurpose, IReadOnlyList<X509Certificate2>>();
         foreach (var purpose in Purposes)
         {
-            // 署名は、有効なものと、NotBefore が未来の次の鍵。期限切れは載せない。
+            // 署名は、公開済みの有効なものと、NotBefore が未来の次の鍵。期限切れは載せない。
             // 暗号化は、保持期間内のもの全部(期限切れでも復号には使える)。Client は期限を見ないので全部。
-            var targets = purpose == CertificatePurpose.ServerSigning
-                ? all[purpose].Where(c => c.NotAfter >= now).ToList()
-                : all[purpose].ToList();
+            var targets = purpose == CertificatePurpose.ServerSigning ? signingCandidates : all[purpose].ToList();
             loaded[purpose] = targets.Select(repository.Load).ToList();
             _inUse[purpose] = targets.Select(c => c.Thumbprint).ToHashSet();
             var active = CertificateRotationPolicy.SelectActive(targets, now);
@@ -106,8 +138,63 @@ public class CertificateService(
                 active?.Thumbprint ?? "none");
         }
 
-        _status = BuildStatus(all, failed ? null : now);
+        _status = BuildStatus(all, outcome.Success ? now : null);
         return new CertificateSet(loaded);
+    }
+
+    /// <summary>
+    /// 起動時の、副作用のない確認。ここで止めれば、何も作らず何も消さない。
+    /// ・初回の生成が許可されていないのに、用途のディレクトリが空(cert/ のマウント漏れの可能性)
+    /// ・署名証明書が 1 つも有効でない(時計が大きく進んだ場合に、暗号化用と Client 用を先に消して作り直さないため)
+    /// ・時計が過去にずれている
+    /// </summary>
+    private void PreflightChecks(DateTimeOffset now)
+    {
+        Dictionary<CertificatePurpose, IReadOnlyList<CertificateInfo>> all;
+        try
+        {
+            all = Purposes.ToDictionary(p => p, repository.GetAll);
+        }
+        catch (InvalidDataException e)
+        {
+            throw new InvalidOperationException($"証明書を読み込めません。起動を中止します。{e.Message}", e);
+        }
+
+        if (!settings.Value.AllowCertificateBootstrap)
+        {
+            var empty = Purposes.Where(p => all[p].Count == 0).Select(CertificateLog.Name).ToList();
+            if (empty.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"証明書が 1 つもありません({string.Join(", ", empty)})。" +
+                    $"証明書のディレクトリ: {Path.GetFullPath(settings.Value.CertificateDirectory)}。" +
+                    "初回のデプロイでないなら、cert/ のボリュームのマウント漏れの可能性があります" +
+                    "(このまま新しい署名鍵で起動すると、Crew と TTC は全員 401 になります)。" +
+                    "初回のデプロイで鍵を作りたいときだけ、Authentication:AllowCertificateBootstrap=true を付けて起動してください。" +
+                    "手順書: Docs/certificate-rotation.md");
+            }
+        }
+
+        // 署名以外は作った時点で NotBefore が過去なので、今より未来の NotBefore があれば時計がおかしい
+        var future = Purposes.Where(p => p != CertificatePurpose.ServerSigning)
+            .SelectMany(p => all[p]).Where(c => c.NotBefore > now + ClockSanityMargin).ToList();
+        if (future.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"システム時刻({CertificateLog.Iso(now)})が、既存の証明書の NotBefore({CertificateLog.Iso(future.Max(c => c.NotBefore))})より過去です。" +
+                "時計がずれている可能性があるため、起動を中止します(何も作らず、何も消していません)。時計を直してください。");
+        }
+
+        if (all[CertificatePurpose.ServerSigning].Count > 0 &&
+            CertificateRotationPolicy.SelectActive(all[CertificatePurpose.ServerSigning], now) is null)
+        {
+            CertificateLog.NoValidSigningCertificate(logger);
+            throw new InvalidOperationException(
+                "有効なサーバー署名証明書がありません(すべて期限切れ、またはすべて NotBefore が未来です)。" +
+                "起動を中止します(何も作らず、何も消していません)。" +
+                "Docs/certificate-rotation.md の「全部期限切れで起動しないとき」を参照してください。" +
+                $" 現在時刻: {CertificateLog.Iso(now)} 証明書: {Describe(all[CertificatePurpose.ServerSigning])}");
+        }
     }
 
     public void Maintain()
@@ -115,7 +202,7 @@ public class CertificateService(
         lock (_gate)
         {
             var now = timeProvider.GetUtcNow();
-            var success = RotateAll(now);
+            var success = RotateAll(now).Success;
             try
             {
                 var all = Purposes.ToDictionary(p => p, repository.GetAll);
@@ -131,14 +218,15 @@ public class CertificateService(
         }
     }
 
-    /// <summary>全用途のローテーションを、ロックの中で 1 回行う。用途ごとの失敗はログに出し、全部成功したときだけ true。</summary>
-    private bool RotateAll(DateTimeOffset now)
+    /// <summary>全用途のローテーションを、ロックの中で 1 回行う。用途ごとの失敗はログに出して続ける。</summary>
+    private RotationOutcome RotateAll(DateTimeOffset now)
     {
         try
         {
             return repository.WithLock(() =>
             {
-                var success = true;
+                Exception? failure = null;
+                var publicFailed = false;
                 foreach (var purpose in Purposes)
                 {
                     try
@@ -148,7 +236,7 @@ public class CertificateService(
                     catch (Exception e) when (e is not OperationCanceledException)
                     {
                         CertificateLog.CertificateRotationFailed(logger, e, CertificateLog.Name(purpose));
-                        success = false;
+                        failure ??= e;
                     }
                 }
 
@@ -159,17 +247,18 @@ public class CertificateService(
                 catch (Exception e) when (e is not OperationCanceledException)
                 {
                     CertificateLog.CertificateRotationFailed(logger, e, "public");
-                    success = false;
+                    failure ??= e;
+                    publicFailed = true;
                 }
 
-                return success;
+                return new RotationOutcome(failure is null, failure, publicFailed);
             });
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
             // ロックが取れない、cert/ を作れない、など
             CertificateLog.CertificateRotationFailed(logger, e, "all");
-            return false;
+            return new RotationOutcome(false, e, true);
         }
     }
 
@@ -178,13 +267,15 @@ public class CertificateService(
         var name = CertificateLog.Name(purpose);
         var certificates = repository.GetAll(purpose);
         var inUse = _inUse.TryGetValue(purpose, out var set) ? set : [];
-        var plan = CertificateRotationPolicy.Plan(purpose, certificates, inUse, now);
+        var plan = CertificateRotationPolicy.Plan(purpose, certificates, inUse, now,
+            _processStart == default ? now : _processStart, settings.Value.AllowCertificateBootstrap);
 
         if (plan.Create is { } create)
         {
             var created = repository.Create(purpose, create.NotBefore, create.NotAfter);
             // 署名は人(Crew・TTC の運用者)にも関わるので Warning。切り替えまでの猶予が足りないときは Error
-            var level = purpose == CertificatePurpose.ServerSigning && !create.Initial
+            // 初回の生成(AllowCertificateBootstrap)も、意図したものか確かめられるよう Warning にする
+            var level = create.Initial || purpose == CertificatePurpose.ServerSigning
                 ? create.ShortNotice ? LogLevel.Error : LogLevel.Warning
                 : LogLevel.Information;
             CertificateLog.CertificateCreated(logger, level, name, created.Thumbprint,
@@ -222,6 +313,11 @@ public class CertificateService(
         foreach (var path in SafeLoosePermissions())
         {
             CertificateLog.CertificatePermissionTooOpen(logger, path);
+        }
+
+        foreach (var name in SafeUnexpectedPublicFiles())
+        {
+            CertificateLog.UnexpectedPublicFile(logger, name);
         }
 
         foreach (var purpose in status.Purposes)
@@ -273,6 +369,18 @@ public class CertificateService(
         try
         {
             return repository.FindLoosePermissions();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private IReadOnlyList<string> SafeUnexpectedPublicFiles()
+    {
+        try
+        {
+            return repository.FindUnexpectedPublicFiles();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

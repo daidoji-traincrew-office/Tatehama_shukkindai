@@ -21,7 +21,10 @@ public sealed class CertificateMetricsTest : IDisposable
     public CertificateMetricsTest()
     {
         _repository = new CertificateRepository(_directory.Path);
-        _service = new CertificateService(_repository, _time, new FakeLogger<CertificateService>());
+        _service = new CertificateService(_repository, _time,
+            Microsoft.Extensions.Options.Options.Create(new Tatehama.Shukkindai.Server.Configuration.AuthenticationSettings
+                { CertificateDirectory = _directory.Path, AllowCertificateBootstrap = true }),
+            new FakeLogger<CertificateService>());
         _metrics = new CertificateMetrics(_service, _time);
     }
 

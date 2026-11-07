@@ -37,6 +37,8 @@ public sealed class WebApplicationFixture : WebApplicationFactory<Program>
         // Program は builder.Configuration を早い段階で読む。環境変数でプロセス全体を汚さないよう UseSetting で渡す
         builder.UseSetting("Authentication:Issuer", Issuer);
         builder.UseSetting("Authentication:CertificateDirectory", CertificateDirectory);
+        // 空のディレクトリから鍵を作って起動する(本番では初回のデプロイでだけ true にする)
+        builder.UseSetting("Authentication:AllowCertificateBootstrap", "true");
         builder.UseSetting("ConnectionStrings:DefaultConnection", ConnectionString);
         builder.UseSetting("Logging:LogLevel:Microsoft.EntityFrameworkCore", "Warning");
         builder.UseSetting("Discord:ClientId", "dummy-client-id");
@@ -45,7 +47,6 @@ public sealed class WebApplicationFixture : WebApplicationFactory<Program>
         builder.UseSetting("Discord:GuildId", "1");
         builder.ConfigureTestServices(services =>
         {
-            services.RemoveAll<DiscordBotHostedService>();
             foreach (var descriptor in services
                          .Where(d => d.ImplementationType == typeof(DiscordBotHostedService)
                                      || d.ServiceType == typeof(IDiscordRepository)).ToList())

@@ -37,6 +37,12 @@ public interface ICertificateRepository
     /// </summary>
     T WithLock<T>(Func<T> action);
 
+    /// <summary><c>public/</c> に、この署名鍵と同じ内容の .cer があるか(Crew と TTC がこの鍵を見られる状態か)。</summary>
+    bool IsPublished(CertificateInfo signingCertificate);
+
+    /// <summary><c>public/</c> にある、.cer と一時ファイル(.tmp)以外のファイル名(特に pfx は、あってはならない)。</summary>
+    IReadOnlyList<string> FindUnexpectedPublicFiles();
+
     /// <summary>Unix で、想定より緩い権限のファイルとディレクトリ(グループ・その他に余計な権限がある)。</summary>
     IReadOnlyList<string> FindLoosePermissions();
 }

@@ -25,10 +25,9 @@ public sealed record CertificateRule(
 /// <param name="ShortNotice">切り替えまでの猶予が <see cref="CertificateRotationPolicy.MinimumActivationDelay"/> に満たない(生成が遅れた)。</param>
 public sealed record CertificateToCreate(DateTimeOffset NotBefore, DateTimeOffset NotAfter, bool Initial, bool ShortNotice);
 
-public sealed record RotationPlan(CertificateToCreate? Create, IReadOnlyList<CertificateInfo> Delete)
-{
-    public static RotationPlan None { get; } = new(null, []);
-}
+/// <param name="BootstrapDenied">用途のディレクトリが空で、初回の生成が許可されていない(AllowCertificateBootstrap = false)。</param>
+public sealed record RotationPlan(
+    CertificateToCreate? Create, IReadOnlyList<CertificateInfo> Delete, bool BootstrapDenied = false);
 
 /// <summary>
 /// ローテーションの方針。時刻と証明書の一覧(メタデータ)から「作る/消す」を決める純粋関数だけを置く。I/O はしない。
@@ -114,19 +113,29 @@ public static class CertificateRotationPolicy
     /// <summary>
     /// 作る証明書と、消す証明書を決める。
     /// <paramref name="inUseThumbprints"/>(プロセスが起動時に読み込んだもの)は、再起動まで消さない。
+    /// 消すのは、NotAfter + 保持期間 と、<paramref name="processStart"/> + 保持期間 の両方を過ぎたものだけ
+    /// (再起動を長く怠ったあとの起動で、直前まで使っていた鍵を、すぐ消さないため)。
+    /// <paramref name="allowBootstrap"/> が false で証明書が 1 つも無いときは、作らず <see cref="RotationPlan.BootstrapDenied"/> にする。
     /// </summary>
     public static RotationPlan Plan(
         CertificatePurpose purpose, IReadOnlyList<CertificateInfo> certificates,
-        IReadOnlySet<string> inUseThumbprints, DateTimeOffset now)
+        IReadOnlySet<string> inUseThumbprints, DateTimeOffset now, DateTimeOffset processStart,
+        bool allowBootstrap = true)
     {
         var rule = RuleFor(purpose);
+        if (certificates.Count == 0 && !allowBootstrap)
+        {
+            return new RotationPlan(null, [], BootstrapDenied: true);
+        }
+
         var create = DecideCreate(rule, certificates, now);
 
         var survivors = certificates.Where(c => c.NotAfter > now).ToList();
         var delete = new List<CertificateInfo>();
         foreach (var certificate in certificates)
         {
-            if (certificate.NotAfter + rule.DeleteAfterExpiry >= now || inUseThumbprints.Contains(certificate.Thumbprint))
+            if (certificate.NotAfter + rule.DeleteAfterExpiry >= now || processStart + rule.DeleteAfterExpiry >= now ||
+                inUseThumbprints.Contains(certificate.Thumbprint))
             {
                 continue;
             }
