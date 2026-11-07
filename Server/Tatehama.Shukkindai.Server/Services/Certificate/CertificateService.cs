@@ -25,6 +25,13 @@ public interface ICertificateService
     void Maintain();
 }
 
+/// <summary>
+/// 証明書の「判断と順序」を受け持つ。ファイルの読み書きは <see cref="ICertificateRepository"/>、
+/// 作る・消すの方針は <see cref="CertificateRotationPolicy"/>(純粋関数)に任せ、ここでは呼ぶ順番とログ・状態の更新を決める。
+/// 呼ばれるのは 2 か所。起動時に <c>GetStartupCertificates</c>(OpenIddict の options の組み立てと
+/// <see cref="HostedService.CertificateRotationHostedService"/> の StartAsync から。初回だけ実行し、以降は同じ結果を返す)、
+/// 動作中に <c>Maintain</c>(HostedService が 24 時間ごと)。
+/// </summary>
 public sealed class CertificateService(
     ICertificateRepository repository,
     TimeProvider timeProvider,
@@ -72,10 +79,13 @@ public sealed class CertificateService(
             CertificateLog.CertificateDirectoryIsRelative(logger, configured, Path.GetFullPath(configured));
         }
 
-        // 1. 何も変えずに確かめる(止めるときは、何も作らず、何も消さない)
+        // --- 1. 何も変えずに確かめる ---
+        // 生成や削除より先に行う。ここで起動を止めるときは、何も作らず、何も消さないため。
         PreflightChecks(now);
 
-        // 2. ローテーション(足りなければ生成。保持期間を過ぎたものの削除)と、public/ の同期
+        // --- 2. ローテーションと public/ の同期(ここから先はディスクを変える) ---
+        // 足りない鍵の生成、保持期間を過ぎた鍵の削除、public/ の .cer の書き直しを、ロックの中でまとめて行う。
+        // ロックが取れない・public/ に書けないときは起動を止める(公開できていない鍵で署名しないため)。
         var outcome = RotateAll(now);
         if (outcome.LockOrPublicFailed)
         {
@@ -85,11 +95,12 @@ public sealed class CertificateService(
                 $" 原因: {outcome.Failure?.Message} 手順書: Docs/certificate-rotation.md", outcome.Failure);
         }
 
+        // --- 3. ローテーション後の状態を読み直し、動かせるかを確かめる ---
+        // 生成・削除の結果を反映した一覧で判断する。動かせない状態は起動を止める(黙って作り直して起動することはしない)。
+        // 止めるときのメッセージには、直前の失敗の実際の原因を入れる。
         var all = Purposes.ToDictionary(p => p, repository.GetAll);
-
-        // 3. 動かせない状態は、起動を止める(黙って作り直して起動することはしない)。原因は実際のものを書く
         var cause = outcome.Failure is null ? string.Empty : $" 直前の失敗: {outcome.Failure.Message}";
-        // 署名は、public/ に同じ内容の .cer がある鍵だけを候補にする(Crew と TTC が一度も見ていない鍵では署名しない)
+        // 署名は、期限内で、public/ に同じ内容の .cer がある鍵だけを候補にする(Crew と TTC が一度も見ていない鍵では署名しない)
         var signingCandidates = all[CertificatePurpose.ServerSigning]
             .Where(c => c.NotAfter >= now && repository.IsPublished(c)).ToList();
         if (CertificateRotationPolicy.SelectActive(signingCandidates, now) is null)
@@ -120,6 +131,9 @@ public sealed class CertificateService(
             }
         }
 
+        // --- 4. 候補を選んで読み込み、「このプロセスが使う鍵」として記録する ---
+        // _inUse / _inUseActive は、(a) 再起動まで消さない鍵の目印(Plan の inUseThumbprints)、
+        // (b) 「再起動が必要か」の比較元(IsRestartRequired)になる。切り替えが再起動のときだけなのはこのため。
         var loaded = new Dictionary<CertificatePurpose, IReadOnlyList<X509Certificate2>>();
         foreach (var purpose in Purposes)
         {
@@ -138,6 +152,7 @@ public sealed class CertificateService(
                 active?.Thumbprint ?? "none");
         }
 
+        // --- 5. 状態を保存して返す(返した証明書が OpenIddict に登録される) ---
         _status = BuildStatus(all, outcome.Success ? now : null);
         return new CertificateSet(loaded);
     }
@@ -150,6 +165,7 @@ public sealed class CertificateService(
     /// </summary>
     private void PreflightChecks(DateTimeOffset now)
     {
+        // --- 1. 一覧を読む(壊れた pfx・読めない権限はここで起動を止める) ---
         Dictionary<CertificatePurpose, IReadOnlyList<CertificateInfo>> all;
         try
         {
@@ -160,6 +176,8 @@ public sealed class CertificateService(
             throw new InvalidOperationException($"証明書を読み込めません。起動を中止します。{e.Message}", e);
         }
 
+        // --- 2. 空のディレクトリは、初回の生成を許可されたときだけ通す ---
+        // cert/ のマウント漏れで空のボリュームになっても、黙って新しい署名鍵で起動しないため(AllowCertificateBootstrap の理由)。
         if (!settings.Value.AllowCertificateBootstrap)
         {
             var empty = Purposes.Where(p => all[p].Count == 0).Select(CertificateLog.Name).ToList();
@@ -175,7 +193,9 @@ public sealed class CertificateService(
             }
         }
 
-        // 署名以外は作った時点で NotBefore が過去なので、今より未来の NotBefore があれば時計がおかしい
+        // --- 3. 時計が過去にずれていないか ---
+        // 署名以外は作った時点で NotBefore が過去なので、今より未来の NotBefore があれば時計がおかしい。
+        // 時計がずれたまま鍵の作成・削除を判断しないよう、何も変えずに止める。
         var future = Purposes.Where(p => p != CertificatePurpose.ServerSigning)
             .SelectMany(p => all[p]).Where(c => c.NotBefore > now + ClockSanityMargin).ToList();
         if (future.Count > 0)
@@ -185,6 +205,8 @@ public sealed class CertificateService(
                 "時計がずれている可能性があるため、起動を中止します(何も作らず、何も消していません)。時計を直してください。");
         }
 
+        // --- 4. 署名の鍵が今使えるか ---
+        // 署名が全部期限切れのまま先へ進むと、暗号化用と Client 用だけが作り直されてしまう。それを避けるため、先に止める。
         if (all[CertificatePurpose.ServerSigning].Count > 0 &&
             CertificateRotationPolicy.SelectActive(all[CertificatePurpose.ServerSigning], now) is null)
         {
@@ -202,7 +224,12 @@ public sealed class CertificateService(
         lock (_gate)
         {
             var now = timeProvider.GetUtcNow();
+
+            // --- 1. ローテーション(次の鍵の生成、期限を過ぎた鍵の削除、public/ の同期) ---
             var success = RotateAll(now).Success;
+
+            // --- 2. ディスクの現状から状態(メトリクスの元になる)を作り直す ---
+            // 失敗しても例外にはせず、前回の状態のまま続ける(定期実行を止めない)。
             try
             {
                 var all = Purposes.ToDictionary(p => p, repository.GetAll);
@@ -214,6 +241,7 @@ public sealed class CertificateService(
                 CertificateLog.CertificateRotationFailed(logger, e, "all");
             }
 
+            // --- 3. 状態のログと、再起動が必要かの通知 ---
             LogStatus(_status, now);
         }
     }
@@ -223,10 +251,14 @@ public sealed class CertificateService(
     {
         try
         {
+            // ロックは、同じ cert/ を見る別のプロセスと、同時に鍵を作らないため。取ったあとに一覧を読み直す(Rotate の中)
             return repository.WithLock(() =>
             {
                 Exception? failure = null;
                 var publicFailed = false;
+
+                // --- 1. 用途ごとに、作る・消すを実行する ---
+                // 1 つの用途が失敗しても、他の用途は続ける(失敗は最初の 1 件を覚えて、呼び出し元の判断に渡す)。
                 foreach (var purpose in Purposes)
                 {
                     try
@@ -240,6 +272,9 @@ public sealed class CertificateService(
                     }
                 }
 
+                // --- 2. public/ の .cer を、署名の pfx に合わせる ---
+                // 1 の後に行う。新しく作った署名鍵の .cer を書き、消した鍵の .cer を消すため。
+                // 失敗は別扱い(publicFailed)にする。起動時は、公開できていない鍵で署名しないために止める理由になる。
                 try
                 {
                     SyncPublic();
@@ -265,11 +300,15 @@ public sealed class CertificateService(
     private void Rotate(CertificatePurpose purpose, DateTimeOffset now)
     {
         var name = CertificateLog.Name(purpose);
+
+        // --- 1. 今のディスクの状態から、作る・消すを決める(判断は CertificateRotationPolicy) ---
+        // ロックを取ったあとに読み直した一覧を使う。このプロセスが使っている鍵(_inUse)は消し候補から外れる。
         var certificates = repository.GetAll(purpose);
         var inUse = _inUse.TryGetValue(purpose, out var set) ? set : [];
         var plan = CertificateRotationPolicy.Plan(purpose, certificates, inUse, now,
             _processStart == default ? now : _processStart, settings.Value.AllowCertificateBootstrap);
 
+        // --- 2. 作る(生成が先。消した結果、期限内の鍵が無くならないようにするため) ---
         if (plan.Create is { } create)
         {
             var created = repository.Create(purpose, create.NotBefore, create.NotAfter);
@@ -282,6 +321,7 @@ public sealed class CertificateService(
                 CertificateLog.Iso(created.NotBefore), CertificateLog.Iso(created.NotAfter));
         }
 
+        // --- 3. 消す(保持期間を過ぎたものだけ。Plan が決めた分) ---
         foreach (var expired in plan.Delete)
         {
             repository.Delete(expired);
@@ -308,8 +348,13 @@ public sealed class CertificateService(
         return new CertificateStatus(purposes, lastSuccess);
     }
 
+    /// <summary>
+    /// 状態のログ(7101〜)を出す。ここで出るログがアラートの入力になる。メトリクスは <see cref="CertificateMetrics"/> が
+    /// <c>GetStatus</c> の結果を読んで出す。
+    /// </summary>
     private void LogStatus(CertificateStatus status, DateTimeOffset now)
     {
+        // --- 1. ディレクトリ全体の点検(権限が緩い、public/ に想定外のファイルがある) ---
         foreach (var path in SafeLoosePermissions())
         {
             CertificateLog.CertificatePermissionTooOpen(logger, path);
@@ -320,6 +365,7 @@ public sealed class CertificateService(
             CertificateLog.UnexpectedPublicFile(logger, name);
         }
 
+        // --- 2. 用途ごと: 証明書 1 枚ごとの状態 ---
         foreach (var purpose in status.Purposes)
         {
             var name = CertificateLog.Name(purpose.Purpose);
@@ -332,6 +378,8 @@ public sealed class CertificateService(
                     CertificateLog.Days(certificate.NotAfter - now));
             }
 
+            // --- 3. 用途ごと: 使用中の鍵の残り日数と、後継の有無 ---
+            // inUse = このプロセスが実際に使っている鍵。起動時に有効な鍵を選べなかったときは、時刻で選んだもの。
             var inUse = purpose.InUseActive ?? activeByTime;
             if (inUse is null)
             {
@@ -346,6 +394,8 @@ public sealed class CertificateService(
                 inUse.Thumbprint, CertificateLog.Iso(inUse.NotAfter), CertificateLog.Days(inUseRemaining),
                 CertificateLog.Iso(newest.NotAfter), CertificateLog.Days(newest.NotAfter - now), successor);
 
+            // --- 4. 再起動が必要か ---
+            // 今の時刻なら使うべき鍵が、プロセスが使っている鍵と違えば、再起動で切り替わる(7105。メトリクス restart_required)。
             if (CertificateRotationPolicy.IsRestartRequired(purpose, now))
             {
                 CertificateLog.RestartRequired(logger, CertificateLog.RestartRequiredLevel(inUseRemaining), name,
@@ -353,6 +403,7 @@ public sealed class CertificateService(
                     CertificateLog.Days(inUseRemaining));
             }
 
+            // --- 5. 署名だけ: 公開済みで、まだ有効になっていない次の鍵(切り替え前の予告、7103) ---
             if (purpose.Purpose == CertificatePurpose.ServerSigning &&
                 CertificateRotationPolicy.NextPending(purpose.Certificates, now) is { } next)
             {

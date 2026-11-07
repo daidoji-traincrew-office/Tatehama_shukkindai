@@ -7,6 +7,11 @@ using Tatehama.Shukkindai.Server.Services.Certificate;
 
 namespace Tatehama.Shukkindai.Server.Repositories.Certificate;
 
+/// <summary>
+/// cert/ のファイルの読み書き。判断はしない(何を作る・消すかは <see cref="CertificateService"/> と
+/// <see cref="CertificateRotationPolicy"/> が決める)。ここが担うのは、pfx の読み込み、鍵の生成と原子的な書き込み、
+/// 権限の設定、public/ の .cer の同期、cert/ 全体の排他ロック。呼ばれるのは起動時と 24 時間ごとの定期実行。
+/// </summary>
 public sealed class CertificateRepository : ICertificateRepository
 {
     public const string PublicDirectoryName = "public";
@@ -103,15 +108,19 @@ public sealed class CertificateRepository : ICertificateRepository
     {
         var rule = CertificateRotationPolicy.RuleFor(purpose);
         var directory = PurposeDirectory(purpose);
+
+        // --- 1. ディレクトリを 0700 で用意する(秘密鍵を含む pfx を置くため) ---
         EnsureDirectory(_root, PrivateDirectoryMode);
         EnsureDirectory(directory, PrivateDirectoryMode);
 
+        // --- 2. 自己署名の証明書を作る(RSA 2048、SHA-256。subject と KeyUsage は用途ごとに決まっている) ---
         using var algorithm = RSA.Create(2048);
         var request = new CertificateRequest(new X500DistinguishedName(rule.Subject), algorithm,
             HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         request.CertificateExtensions.Add(new X509KeyUsageExtension(rule.KeyUsage, true));
         using var certificate = request.CreateSelfSigned(notBefore, notAfter);
 
+        // --- 3. pfx を 0600 で原子的に書く(パスワードなし。ファイル名は NotBefore と Thumbprint の先頭 8 桁) ---
         var fileName = $"{notBefore.UtcDateTime:yyyyMMdd'T'HHmmss'Z'}-{certificate.Thumbprint[..8]}.pfx";
         var path = Path.Combine(directory, fileName);
         WriteAtomically(path, certificate.Export(X509ContentType.Pfx, string.Empty), PfxMode, directory);
@@ -122,9 +131,11 @@ public sealed class CertificateRepository : ICertificateRepository
 
     public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signingCertificates)
     {
+        // public/ は Crew と TTC が読むので 0755(cert/ 本体は 0700 のまま)
         EnsureDirectory(_root, PrivateDirectoryMode);
         EnsureDirectory(PublicDirectory, PublicDirectoryMode);
 
+        // --- 1. あるべき .cer(署名の pfx 1 つにつき 1 つ、公開鍵だけの DER)を作る ---
         var changes = new List<string>();
         var expected = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var info in signingCertificates)
@@ -134,6 +145,7 @@ public sealed class CertificateRepository : ICertificateRepository
             expected[CerFileName(info.Thumbprint)] = certificate.Export(X509ContentType.Cert);
         }
 
+        // --- 2. 無い・内容が違う .cer を書く(先に書く。消す前に新しい鍵を公開しておくため) ---
         foreach (var (name, bytes) in expected.OrderBy(e => e.Key, StringComparer.Ordinal))
         {
             var path = Path.Combine(PublicDirectory, name);
@@ -148,6 +160,7 @@ public sealed class CertificateRepository : ICertificateRepository
             changes.Add("+" + name);
         }
 
+        // --- 3. あるべきでない .cer(pfx を消した鍵のもの)を消す。.cer 以外には触らない ---
         foreach (var path in Directory.EnumerateFiles(PublicDirectory)
                      .Where(p => string.Equals(Path.GetExtension(p), ".cer", StringComparison.OrdinalIgnoreCase)))
         {
@@ -159,10 +172,12 @@ public sealed class CertificateRepository : ICertificateRepository
             }
         }
 
+        // --- 4. 書きかけで残った古い .tmp を掃除する ---
         DeleteStaleTemporaryFiles();
         return changes;
     }
 
+    /// <summary>public/ に、この署名鍵と同じ内容の .cer があるか(起動時に、署名に使ってよい鍵を絞るのに使う)。</summary>
     public bool IsPublished(CertificateInfo signingCertificate)
     {
         var path = Path.Combine(PublicDirectory, CerFileName(signingCertificate.Thumbprint));
@@ -213,6 +228,10 @@ public sealed class CertificateRepository : ICertificateRepository
         }
     }
 
+    /// <summary>
+    /// cert/.rotation.lock を排他で開いている間だけ <paramref name="action"/> を実行する。同じ cert/ を見る別のプロセスと、
+    /// 同時に鍵を作らないため。取れなければ <see cref="LockTimeout"/> まで 100ms 間隔で再試行し、それでも取れなければ例外にする。
+    /// </summary>
     public T WithLock<T>(Func<T> action)
     {
         EnsureDirectory(_root, PrivateDirectoryMode);

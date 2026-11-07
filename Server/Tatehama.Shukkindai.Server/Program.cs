@@ -283,9 +283,11 @@ public class Program
     /// <summary>
     /// 証明書の自動ローテーション(Development 以外)。証明書は cert/ の用途別ディレクトリで管理し、
     /// 起動時(Kestrel が listen する前)にそろえて OpenIddict に登録する。
+    /// 流れは Docs/certificate-rotation.md の「処理の流れ」を参照。
     /// </summary>
     private static void ConfigureCertificateServices(WebApplicationBuilder builder)
     {
+        // 層ごと: Repository(ファイルの I/O)→ Service(判断と順序)→ OpenIddict への登録 → HostedService(呼ぶ時期)
         builder.Services.AddSingleton<ICertificateRepository, CertificateRepository>();
         builder.Services.AddSingleton<ICertificateService, CertificateService>();
         builder.Services.AddSingleton<CertificateMetrics>();

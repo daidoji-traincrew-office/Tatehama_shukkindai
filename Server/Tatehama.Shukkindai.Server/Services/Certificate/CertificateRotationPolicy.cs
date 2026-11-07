@@ -31,6 +31,8 @@ public sealed record RotationPlan(
 
 /// <summary>
 /// ローテーションの方針。時刻と証明書の一覧(メタデータ)から「作る/消す」を決める純粋関数だけを置く。I/O はしない。
+/// <see cref="CertificateService"/> が、起動時と 24 時間ごとの両方で <see cref="Plan"/> を呼び、結果を Repository に実行させる。
+/// 寿命・残り日数の閾値は <see cref="RuleFor"/> に集めてある(値は Docs/certificate-rotation.md の「用途と寿命」と同じ)。
 /// </summary>
 public static class CertificateRotationPolicy
 {
@@ -48,6 +50,10 @@ public static class CertificateRotationPolicy
 
     private static readonly TimeSpan Lifetime = TimeSpan.FromDays(365 * 2);
 
+    // 閾値の見方(E = 最も遠い NotAfter):
+    //   署名:        RenewBefore 150 日 = E-150 日に次の鍵を作る。切り替え(次の鍵の NotBefore)は E-60 日。古い鍵は E+7 日以降に削除。
+    //   暗号化:      E-60 日に次の鍵を作る(すぐ有効)。E+14 日以降に削除(refresh token の復号のため)。
+    //   Client 用:   E-60 日に次の鍵を作る(すぐ有効)。E+1 日以降に削除。
     public static CertificateRule RuleFor(CertificatePurpose purpose) => purpose switch
     {
         CertificatePurpose.ServerSigning => new CertificateRule("server-signing",
@@ -123,13 +129,22 @@ public static class CertificateRotationPolicy
         bool allowBootstrap = true)
     {
         var rule = RuleFor(purpose);
+
+        // --- 1. 空のディレクトリ: 初回の生成が許可されていなければ、何もしない ---
+        // cert/ のマウント漏れで、黙って新しい署名鍵を作らないため(呼び出し元は起動の事前確認でも止める)。
         if (certificates.Count == 0 && !allowBootstrap)
         {
             return new RotationPlan(null, [], BootstrapDenied: true);
         }
 
+        // --- 2. 作るか(次の鍵が必要な時期か) ---
         var create = DecideCreate(rule, certificates, now);
 
+        // --- 3. 消すか ---
+        // 消すのは次の 3 つのどれにも当てはまらない鍵だけ:
+        //   a. NotAfter + 保持期間 を過ぎていない(古い鍵で作られたものが残る間は持つ。例: 署名は古いアクセストークンの検証、暗号化は refresh token の復号)
+        //   b. プロセス起動 + 保持期間 を過ぎていない(長く再起動しなかったあとの起動で、直前まで使った鍵をすぐ消さない)
+        //   c. このプロセスが使っている(再起動まで残す)
         var survivors = certificates.Where(c => c.NotAfter > now).ToList();
         var delete = new List<CertificateInfo>();
         foreach (var certificate in certificates)
@@ -140,7 +155,8 @@ public static class CertificateRotationPolicy
                 continue;
             }
 
-            // 消した結果、期限内の証明書が 1 つも残らない状態にはしない(空になると、初回扱いで勝手に作り直してしまうため)
+            // 消した結果、期限内の証明書が 1 つも残らない状態にはしない(空になると、初回扱いで勝手に作り直してしまうため)。
+            // 作る予定(create)があれば、新しい鍵が残るので消してよい
             if (create is null && survivors.Count == 0)
             {
                 continue;
@@ -155,6 +171,7 @@ public static class CertificateRotationPolicy
     private static CertificateToCreate? DecideCreate(
         CertificateRule rule, IReadOnlyList<CertificateInfo> certificates, DateTimeOffset now)
     {
+        // --- 1. 初回: ディレクトリが空 ---
         if (certificates.Count == 0)
         {
             // 初回。署名も、すぐ使える証明書を作って起動する
@@ -162,6 +179,8 @@ public static class CertificateRotationPolicy
             return new CertificateToCreate(notBefore, notBefore + rule.Lifetime, Initial: true, ShortNotice: false);
         }
 
+        // --- 2. まだ次の鍵を作る時期ではない ---
+        // newest は NotBefore が未来の鍵も含めた最も遠い NotAfter(E)。次の鍵を作ると約 2 年に戻るので、重複して作らない。
         var newest = certificates.Max(c => c.NotAfter);
         var remaining = newest - now;
         if (remaining > rule.RenewBefore)
@@ -169,19 +188,22 @@ public static class CertificateRotationPolicy
             return null;
         }
 
+        // --- 3. すぐ使う鍵(暗号化・Client 用): 今の時刻から有効にする ---
         if (!rule.DeferredActivation)
         {
             var notBefore = now - ClockSkew;
             return new CertificateToCreate(notBefore, notBefore + rule.Lifetime, Initial: false, ShortNotice: false);
         }
 
+        // --- 4. 署名の次の鍵: 公開だけ先にして、有効になるのは未来にする ---
         if (remaining <= TimeSpan.Zero)
         {
             // 署名が全部期限切れ。黙って新しい鍵を作って起動することはしない(人が手順書で対応する)
             return null;
         }
 
-        // 切り替えは期限の 60 日前。遅れたときは、公開から最低 14 日は空ける。ただし期限の 1 日前より後にはしない
+        // 切り替え(次の鍵の NotBefore)は E-60 日。生成が遅れたときは、Crew と TTC が読み込む猶予として、公開から最低 14 日は空ける。
+        // ただし E-1 日より後にはしない(古い鍵が切れる前に次の鍵が有効になっていないと、隙間ができるため)。
         var activation = newest - ActivateBeforeExpiry;
         var earliest = now + MinimumActivationDelay;
         var shortNotice = activation < earliest;

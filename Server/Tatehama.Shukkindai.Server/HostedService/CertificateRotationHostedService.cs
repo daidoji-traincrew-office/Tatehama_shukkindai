@@ -8,7 +8,8 @@ namespace Tatehama.Shukkindai.Server.HostedService;
 
 /// <summary>
 /// 起動時に証明書を読み込み(足りなければ生成)、24 時間ごとにローテーションと状態のログ・メトリクスの更新を行う。
-/// 中身は <see cref="ICertificateService"/> にある。
+/// 中身は <see cref="ICertificateService"/> にある。ここは「いつ呼ぶか」だけを持つ。
+/// 最初の hosted service として登録される(Program.cs)ので、証明書の不備は Discord への接続より先に起動を止める。
 /// </summary>
 public sealed class CertificateRotationHostedService(
     ICertificateService certificateService,
@@ -28,7 +29,10 @@ public sealed class CertificateRotationHostedService(
     /// </summary>
     public override Task StartAsync(CancellationToken cancellationToken)
     {
+        // --- 1. 証明書をそろえる(事前確認 → ロック → 生成・削除・公開 → 候補の選択。足りなければここで例外=起動停止) ---
         certificateService.GetStartupCertificates();
+
+        // --- 2. OpenIddict の options をここで作らせる ---
         // options は最初に取り出されたときに 1 回だけ作られる(動いているプロセスでは作り直さない)。
         // リクエストが来てからではなく、ここで OpenIddict の検証(有効な証明書があるか)まで済ませる
         _ = serverOptions.CurrentValue;
@@ -39,6 +43,7 @@ public sealed class CertificateRotationHostedService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // 起動直後に 1 回(状態のログとメトリクスを出す)、その後は 24 時間ごとに Maintain を呼ぶ
         using var timer = new PeriodicTimer(Interval);
         do
         {

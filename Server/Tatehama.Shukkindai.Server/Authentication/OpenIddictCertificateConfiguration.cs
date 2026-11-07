@@ -9,6 +9,8 @@ namespace Tatehama.Shukkindai.Server.Authentication;
 
 /// <summary>
 /// 起動時に <see cref="ICertificateService"/> が用意した証明書を、OpenIddict の Server に登録する。
+/// OpenIddict の options が最初に取り出されたとき(CertificateRotationHostedService の StartAsync)に、1 回だけ呼ばれる。
+/// 動いているプロセスでは作り直さないので、鍵の切り替えは再起動のときだけになる。
 /// 署名は、有効なものと、NotBefore が未来の次の鍵(JWKS に載るが、署名には使われない)。
 /// 使う鍵は OpenIddict が選ぶ(有効期間内のうち NotAfter が最も遠いもの)。登録の順番は関係ない。
 /// </summary>
@@ -32,7 +34,10 @@ public sealed class OpenIddictServerCertificateConfiguration(ICertificateService
     }
 }
 
-/// <summary>Discord ログインの state token 用の証明書を、OpenIddict の Client に登録する。</summary>
+/// <summary>
+/// Discord ログインの state token 用の証明書を、OpenIddict の Client に登録する。
+/// Server 側と同じく、options が最初に取り出されたときに 1 回だけ呼ばれる。
+/// </summary>
 public sealed class OpenIddictClientCertificateConfiguration(ICertificateService certificateService)
     : IConfigureOptions<OpenIddictClientOptions>
 {
