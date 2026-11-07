@@ -50,6 +50,19 @@ DB は `docker compose -f Server/compose.yml up -d`。Development の issuer は
 - 既定の認証スキームは Cookie(ログイン途中用)なので、`[Authorize]` だけだと Cookie で判定される。出勤台 API は OpenIddict Validation のスキーム(`OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme`)を明示して認可すること。
 - アクセストークンに載せる claim の方針は `TokenDestinations` に集約している。claim を足すのは仕様変更なので、`Docs/authentication.md` と IT の許可リストも直す。
 
+## 証明書(自動ローテーション)
+Development 以外では、署名・暗号化の証明書を出勤台が自動で作り、切り替え、古いものを消す。運用と手順書は `Docs/certificate-rotation.md`、Crew/TTC 向けの設計は `Docs/authentication.md`。
+- レイアウト(`Authentication:CertificateDirectory`、Docker では `/app/cert`。永続化する): `cert/{server-signing,server-encryption,client-signing,client-encryption}/*.pfx`(0600、ディレクトリは `cert/` ごと 0700)、`cert/public/server-signing-{Thumbprint}.cer`(0644、ディレクトリ 0755)、`cert/.rotation.lock`。
+- `cert/public/` は `.cer` だけ。Crew と TTC が同じホストで、このディレクトリを**読み取り専用でマウント**して `*.cer` を全部検証鍵にする。pfx は決して置かない。
+- 寿命 2 年。署名は残り 150 日で次の鍵を作って公開し、期限の 60 日前に切り替える(古い鍵は NotAfter + 7 日で削除)。暗号化(Server)は残り 60 日で次を作り NotAfter + 14 日まで残す。Client 用は残り 60 日、NotAfter + 1 日。
+- **切り替えは再起動のときだけ**(動いているプロセスの OpenIddict の options は作り直さない)。再起動が必要なことは、ログ `RestartRequired`(EventId 7105)とメトリクス `shukkindai.certificate.restart_required` で知らせる。運転会のない日に人が再起動する。
+- 有効な署名証明書が 1 つも無ければ、起動を止める(初回で用途のディレクトリが空のときだけ、作って起動する)。
+- 自動化のコードは `Services/CertificateRotationPolicy`(純粋関数)・`Services/CertificateService`・`Repositories/Certificate/`・`HostedService/CertificateRotationHostedService`。ログの EventId(7101〜7111)は固定なので変えない(アラートが使う)。
+- 手動の作業用に `Server/tools/gen-cert.cs` と `inspect-cert.cs`(`dotnet run Server/tools/gen-cert.cs -- ...`)がある。
+
+## OpenTelemetry
+`OTEL_EXPORTER_OTLP_ENDPOINT` が設定されているときだけ有効(Crew と同じ)。ASP.NET Core と HttpClient の metrics・tracing、ログの OTLP 出力、自前の Meter(`Tatehama.Shukkindai.Server.Certificates`)を送る。環境変数 `OTEL_EXPORTER_OTLP_ENDPOINT`、`OTEL_SERVICE_NAME=tatehama-shukkindai` などで設定する。メトリクスの一覧は `Docs/certificate-rotation.md`。
+
 ## Atlas
 ```
 cd Server/Database
@@ -60,4 +73,4 @@ atlas migrate diff <名前> --env local    # schema.sql を変えたら diff を
 命名方針: OpenIddict のテーブル名(`OpenIddictApplications` など)はそのまま、列名は snake_case(`ApplicationDbContext` で変換)。
 
 ## 秘密情報
-Discord の ClientSecret / BotToken はリポジトリに置かない。User Secrets(`dotnet user-secrets`)か環境変数(`Discord__ClientSecret` など)で渡す。appsettings*.json には書かない。証明書(`cert/`)もコミットしない。
+Discord の ClientSecret / BotToken はリポジトリに置かない。User Secrets(`dotnet user-secrets`)か環境変数(`Discord__ClientSecret` など)で渡す。appsettings*.json には書かない。証明書(`cert/`。pfx は秘密鍵を含む)もコミットしない。
