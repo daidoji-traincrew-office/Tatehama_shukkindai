@@ -7,6 +7,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using OpenIddict.Client;
 using OpenIddict.Server;
+using OpenTelemetry;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using Tatehama.Shukkindai.Server.Authentication;
@@ -60,6 +64,10 @@ public class Program
             ConfigureCertificateServices(builder);
         }
 
+        if (builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] != null)
+        {
+            ConfigureOpenTelemetryService(builder);
+        }
 
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddControllers();
@@ -284,5 +292,29 @@ public class Program
         builder.Services.AddSingleton<IConfigureOptions<OpenIddictClientOptions>, OpenIddictClientCertificateConfiguration>();
         // 最初の hosted service にする(Discord への接続より先に、証明書の不備で止める)
         builder.Services.AddHostedService<CertificateRotationHostedService>();
+    }
+
+    /// <summary>OTEL_EXPORTER_OTLP_ENDPOINT が設定されているときだけ有効にする(Crew と同じ)。</summary>
+    private static void ConfigureOpenTelemetryService(WebApplicationBuilder builder)
+    {
+        builder.Logging.AddOpenTelemetry(logging =>
+        {
+            logging.IncludeFormattedMessage = true;
+            logging.IncludeScopes = true;
+        });
+
+        var otel = builder.Services.AddOpenTelemetry();
+        otel.WithMetrics(metrics =>
+        {
+            metrics.AddAspNetCoreInstrumentation();
+            metrics.AddHttpClientInstrumentation();
+            metrics.AddMeter(CertificateMetrics.MeterName);
+        });
+        otel.WithTracing(tracing =>
+        {
+            tracing.AddAspNetCoreInstrumentation();
+            tracing.AddHttpClientInstrumentation();
+        });
+        otel.UseOtlpExporter();
     }
 }
