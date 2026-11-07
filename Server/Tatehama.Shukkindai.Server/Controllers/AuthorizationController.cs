@@ -36,6 +36,10 @@ public class AuthorizationController(
             return Results.Challenge(properties, [externalLoginOptions.Value.ChallengeScheme]);
         }
 
+        // ログイン途中の Cookie は 1 回だけ使うものなので、ここで消す。消さないと、
+        //   - 有効期限(10 分)内の次の authorize が Discord ログインを飛ばし、前の Discord ID をそのまま使ってしまう
+        //     (アカウントを切り替えられない。共有 PC では別の人のアカウントでログインされてしまう)
+        //   - Cookie には callback が付けた失敗の印も入っているので、同じエラーが出続ける
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
 
         var request = HttpContext.GetOpenIddictServerRequest();
@@ -72,26 +76,27 @@ public class AuthorizationController(
             return Fail(Errors.ServerError, "OpenIddict のリクエストが見つかりませんでした。");
         }
 
-        if (request.IsAuthorizationCodeGrantType() || request.IsRefreshTokenGrantType())
+        if (!request.IsAuthorizationCodeGrantType() && !request.IsRefreshTokenGrantType())
         {
-            var authenticateResult = await HttpContext.AuthenticateAsync(
-                OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-            var principal = authenticateResult.Principal;
-            if (principal is null)
-            {
-                return Fail(Errors.InvalidGrant, "トークンが不正です。");
-            }
-
-            if (request.IsAuthorizationCodeGrantType())
-            {
-                // メンバー確認は authorize で済んでいるので、そのまま SignIn する
-                return Results.SignIn(principal, properties: null, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-            }
-
-            return ToResult(await tokenService.CreatePrincipalForRefresh(principal, cancellationToken));
+            return Fail(Errors.UnsupportedGrantType, "このグラントタイプには対応していません。");
         }
 
-        return Fail(Errors.UnsupportedGrantType, "このグラントタイプには対応していません。");
+        // authorization code / refresh token の検証は OpenIddict が済ませていて、その結果がここで取れる
+        var authenticateResult = await HttpContext.AuthenticateAsync(
+            OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        var principal = authenticateResult.Principal;
+        if (principal is null)
+        {
+            return Fail(Errors.InvalidGrant, "トークンが不正です。");
+        }
+
+        if (request.IsAuthorizationCodeGrantType())
+        {
+            // メンバー確認は authorize で済んでいるので、そのまま SignIn する
+            return Results.SignIn(principal, properties: null, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        }
+
+        return ToResult(await tokenService.CreatePrincipalForRefresh(principal, cancellationToken));
     }
 
     [HttpGet("~/auth/callback"), HttpPost("~/auth/callback")]
