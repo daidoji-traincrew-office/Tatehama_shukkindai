@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.IdentityModel.Tokens;
 using Tatehama.Shukkindai.Server.IT.Fixture;
 
@@ -12,6 +13,16 @@ public static class IdpTestHelper
 {
     public const string ClientId = "Tatehama_Shukkindai_Client";
     public const string RedirectUri = "http://localhost:51180/";
+
+    /// <summary>Cookie を保持し、リダイレクトを自動では辿らない HttpClient(ログイン途中の Cookie を確かめるため)。</summary>
+    public static HttpClient CreateIdpClient<TEntryPoint>(this WebApplicationFactory<TEntryPoint> factory)
+        where TEntryPoint : class =>
+        factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost/"),
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
 
     private static long _idCounter = 900_000_000_000_000_000L + Random.Shared.NextInt64(1_000_000);
 

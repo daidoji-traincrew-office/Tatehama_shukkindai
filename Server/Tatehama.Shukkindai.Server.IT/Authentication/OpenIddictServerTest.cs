@@ -15,8 +15,13 @@ namespace Tatehama.Shukkindai.Server.IT.Authentication;
 public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
 {
     private readonly WebApplicationFixture _factory = fixture;
-    private X509Certificate2 LoadCer() => X509CertificateLoader.LoadCertificateFromFile(
-        Path.Combine(_factory.CertificateDirectory, "server-signing-certificate.cer"));
+
+    /// <summary>Crew と TTC が <c>cert/public/</c> から読む .cer を全部読む。</summary>
+    private X509Certificate2 LoadCer()
+    {
+        var path = Assert.Single(Directory.GetFiles(_factory.PublicDirectory, "*.cer"));
+        return X509CertificateLoader.LoadCertificateFromFile(path);
+    }
 
     [Fact]
     public async Task AccessToken_ValidatesStaticallyWithCerFile()
@@ -115,16 +120,47 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Startup_CreatesSigningPfxAndMatchingCer()
+    public async Task Startup_FreshDirectory_CreatesSigningPfxAndMatchingPublicCer()
     {
         using var client = _factory.CreateIdpClient();
         await client.GetAsync("healthz", Ct); // 起動させる
 
-        var pfxPath = Path.Combine(_factory.CertificateDirectory, "server-signing-certificate.pfx");
-        Assert.True(File.Exists(pfxPath));
+        var pfxPath = Assert.Single(Directory.GetFiles(Path.Combine(_factory.CertificateDirectory, "server-signing"),
+            "*.pfx"));
         using var pfx = X509CertificateLoader.LoadPkcs12FromFile(pfxPath, string.Empty);
         using var cer = LoadCer();
         Assert.Equal("CN=Tatehama Shukkindai Server Signing Certificate", cer.Subject);
         Assert.Equal(pfx.GetPublicKey(), cer.GetPublicKey());
+        Assert.False(cer.HasPrivateKey);
+        Assert.Equal($"server-signing-{cer.Thumbprint}.cer", Path.GetFileName(Directory.GetFiles(_factory.PublicDirectory)[0]));
+
+        // 暗号化・Client 用も、初回は作る。pfx は public/ に置かない
+        foreach (var name in new[] { "server-encryption", "client-signing", "client-encryption" })
+        {
+            Assert.Single(Directory.GetFiles(Path.Combine(_factory.CertificateDirectory, name), "*.pfx"));
+        }
+
+        Assert.DoesNotContain(Directory.GetFiles(_factory.PublicDirectory), f => f.EndsWith(".pfx"));
+    }
+
+    [Fact]
+    public async Task Startup_FreshDirectory_UsesDocumentedPermissions()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var client = _factory.CreateIdpClient();
+        await client.GetAsync("healthz", Ct);
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(_factory.CertificateDirectory));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(Path.Combine(_factory.CertificateDirectory, "server-signing")));
+        Assert.Equal((UnixFileMode)0b111_101_101, File.GetUnixFileMode(_factory.PublicDirectory));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            File.GetUnixFileMode(Directory.GetFiles(Path.Combine(_factory.CertificateDirectory, "server-signing"))[0]));
+        Assert.Equal((UnixFileMode)0b110_100_100, File.GetUnixFileMode(Directory.GetFiles(_factory.PublicDirectory)[0]));
     }
 }

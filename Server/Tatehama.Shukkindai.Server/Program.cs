@@ -1,18 +1,19 @@
 using System.Net;
-using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using OpenIddict.Client;
+using OpenIddict.Server;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using Tatehama.Shukkindai.Server.Authentication;
-using Tatehama.Shukkindai.Server.Certificates;
 using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Data;
 using Tatehama.Shukkindai.Server.HostedService;
+using Tatehama.Shukkindai.Server.Repositories.Certificate;
 using Tatehama.Shukkindai.Server.Repositories.Database;
 using Tatehama.Shukkindai.Server.Repositories.Discord;
 using Tatehama.Shukkindai.Server.Services;
@@ -32,11 +33,10 @@ public class Program
         var discordSettings = BindAndValidate<DiscordSettings>(
             builder, DiscordSettings.SectionName, new DiscordSettingsValidator());
 
-        var certificates = new List<(string, X509Certificate2)>();
-        ConfigureServices(builder, authenticationSettings, discordSettings, isDevelopment, certificates);
+        ConfigureServices(builder, authenticationSettings, discordSettings, isDevelopment);
 
         var app = builder.Build();
-        Configure(app, authenticationSettings, isDevelopment, certificates);
+        Configure(app, isDevelopment);
         ConfigureEndpoints(app);
         await RegisterOpenIddictApplication(app);
 
@@ -45,7 +45,7 @@ public class Program
 
     private static void ConfigureServices(
         WebApplicationBuilder builder, AuthenticationSettings authenticationSettings,
-        DiscordSettings discordSettings, bool isDevelopment, List<(string, X509Certificate2)> certificates)
+        DiscordSettings discordSettings, bool isDevelopment)
     {
         ConfigureOptions(builder);
         ConfigureLogging(builder);
@@ -53,8 +53,13 @@ public class Program
         ConfigureDatabase(builder);
         ConfigureAuthenticationServices(builder);
 
-        var openIddict = ConfigureOpenIddictServer(builder, authenticationSettings, isDevelopment, certificates);
-        ConfigureOpenIddictClient(openIddict, authenticationSettings, discordSettings, isDevelopment, certificates);
+        var openIddict = ConfigureOpenIddictServer(builder, authenticationSettings, isDevelopment);
+        ConfigureOpenIddictClient(openIddict, discordSettings, isDevelopment);
+        if (!isDevelopment)
+        {
+            ConfigureCertificateServices(builder);
+        }
+
 
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddControllers();
@@ -71,17 +76,8 @@ public class Program
         builder.Services.AddHostedService<TokenPruningHostedService>();
     }
 
-    private static void Configure(
-        WebApplication app, AuthenticationSettings authenticationSettings, bool isDevelopment,
-        List<(string, X509Certificate2)> certificates)
+    private static void Configure(WebApplication app, bool isDevelopment)
     {
-        CertificateStore.WarnIfExpiring(certificates, app.Logger, DateTimeOffset.UtcNow);
-        foreach (var path in CertificateStore.PfxPaths(authenticationSettings.CertificateDirectory)
-                     .Where(CertificateStore.IsPermissionTooOpen))
-        {
-            app.Logger.LogWarning("Certificate file {Path} is readable by group/others. Use mode 0600.", path);
-        }
-
         if (!isDevelopment)
         {
             app.UseForwardedHeaders();
@@ -190,8 +186,7 @@ public class Program
     }
 
     private static OpenIddictBuilder ConfigureOpenIddictServer(
-        WebApplicationBuilder builder, AuthenticationSettings settings, bool isDevelopment,
-        List<(string, X509Certificate2)> certificates)
+        WebApplicationBuilder builder, AuthenticationSettings settings, bool isDevelopment)
     {
         return builder.Services.AddOpenIddict()
             .AddCore(options => options.UseEntityFrameworkCore().UseDbContext<ApplicationDbContext>())
@@ -220,19 +215,11 @@ public class Program
                 options.SetAccessTokenLifetime(TimeSpan.FromHours(1))
                     .SetRefreshTokenLifetime(TimeSpan.FromDays(7));
 
+                // Development 以外の証明書は、OpenIddictServerCertificateConfiguration(ConfigureCertificateServices)が登録する
                 if (isDevelopment)
                 {
                     options.AddDevelopmentEncryptionCertificate()
                         .AddDevelopmentSigningCertificate();
-                }
-                else
-                {
-                    var encryption = CertificateStore.LoadServerEncryptionCertificate(settings.CertificateDirectory);
-                    var signing = CertificateStore.LoadServerSigningCertificate(settings.CertificateDirectory);
-                    certificates.Add((CertificateStore.ServerEncryptionCertificateName, encryption));
-                    certificates.Add((CertificateStore.ServerSigningCertificateName, signing));
-                    options.AddEncryptionCertificate(encryption);
-                    options.AddSigningCertificate(signing);
                 }
 
                 options.UseAspNetCore()
@@ -247,8 +234,7 @@ public class Program
     }
 
     private static void ConfigureOpenIddictClient(
-        OpenIddictBuilder openIddict, AuthenticationSettings settings, DiscordSettings discordSettings,
-        bool isDevelopment, List<(string, X509Certificate2)> certificates)
+        OpenIddictBuilder openIddict, DiscordSettings discordSettings, bool isDevelopment)
     {
         openIddict.AddClient(options =>
         {
@@ -258,15 +244,6 @@ public class Program
             {
                 options.AddDevelopmentEncryptionCertificate()
                     .AddDevelopmentSigningCertificate();
-            }
-            else
-            {
-                var encryption = CertificateStore.LoadClientEncryptionCertificate(settings.CertificateDirectory);
-                var signing = CertificateStore.LoadClientSigningCertificate(settings.CertificateDirectory);
-                certificates.Add((CertificateStore.ClientEncryptionCertificateName, encryption));
-                certificates.Add((CertificateStore.ClientSigningCertificateName, signing));
-                options.AddEncryptionCertificate(encryption);
-                options.AddSigningCertificate(signing);
             }
 
             // EnableErrorPassthrough が無いと、Discord がエラー(access_denied など)付きで callback に戻ってきたとき、
@@ -292,5 +269,20 @@ public class Program
                 });
 
         });
+    }
+
+    /// <summary>
+    /// 証明書の自動ローテーション(Development 以外)。証明書は cert/ の用途別ディレクトリで管理し、
+    /// 起動時(Kestrel が listen する前)にそろえて OpenIddict に登録する。
+    /// </summary>
+    private static void ConfigureCertificateServices(WebApplicationBuilder builder)
+    {
+        builder.Services.AddSingleton<ICertificateRepository, CertificateRepository>();
+        builder.Services.AddSingleton<ICertificateService, CertificateService>();
+        builder.Services.AddSingleton<CertificateMetrics>();
+        builder.Services.AddSingleton<IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerCertificateConfiguration>();
+        builder.Services.AddSingleton<IConfigureOptions<OpenIddictClientOptions>, OpenIddictClientCertificateConfiguration>();
+        // 最初の hosted service にする(Discord への接続より先に、証明書の不備で止める)
+        builder.Services.AddHostedService<CertificateRotationHostedService>();
     }
 }

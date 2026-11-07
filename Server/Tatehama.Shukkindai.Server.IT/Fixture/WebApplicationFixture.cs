@@ -25,6 +25,9 @@ public sealed class WebApplicationFixture : WebApplicationFactory<Program>
     public string CertificateDirectory { get; } =
         Path.Combine(Path.GetTempPath(), "shukkindai-it-" + Guid.NewGuid());
 
+    /// <summary>Crew と TTC が読む公開鍵(.cer)のディレクトリ。</summary>
+    public string PublicDirectory => Path.Combine(CertificateDirectory, "public");
+
     public FakeDiscordRepository DiscordRepository { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -64,13 +67,6 @@ public sealed class WebApplicationFixture : WebApplicationFactory<Program>
             });
         });
     }
-
-    public HttpClient CreateIdpClient() => CreateClient(new WebApplicationFactoryClientOptions
-    {
-        BaseAddress = new Uri("https://localhost/"),
-        AllowAutoRedirect = false,
-        HandleCookies = true,
-    });
 
     protected override void Dispose(bool disposing)
     {
