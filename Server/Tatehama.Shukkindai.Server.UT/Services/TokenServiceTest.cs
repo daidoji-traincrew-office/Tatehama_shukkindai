@@ -24,8 +24,8 @@ public class TokenServiceTest
             NullLogger<TokenService>.Instance);
     }
 
-    private void SetLookup(MemberLookupStatus status, string? username = null) =>
-        _discordService.Setup(l => l.GetMemberById(UserId))
+    private void SetDiscordMember(MemberLookupStatus status, string? username = null) =>
+        _discordService.Setup(d => d.GetMemberById(UserId))
             .ReturnsAsync(new MemberLookupResult(status, username));
 
     private static ClaimsPrincipal CreateRefreshPrincipal(string? sub, string name, params string[] scopes)
@@ -41,7 +41,7 @@ public class TokenServiceTest
     [Fact]
     public async Task CreatePrincipalForAuthorization_Member_SetsSubAndNameOnlyForAccessToken()
     {
-        SetLookup(MemberLookupStatus.Member, "alice");
+        SetDiscordMember(MemberLookupStatus.Member, "alice");
 
         var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OfflineAccess], "127.0.0.1",
             TestContext.Current.CancellationToken);
@@ -64,7 +64,7 @@ public class TokenServiceTest
     [Fact]
     public async Task CreatePrincipalForAuthorization_Member_KeepsOnlyOfflineAccessScope()
     {
-        SetLookup(MemberLookupStatus.Member, "alice");
+        SetDiscordMember(MemberLookupStatus.Member, "alice");
 
         var result = await _service.CreatePrincipalForAuthorization(UserId,
             [Scopes.OpenId, Scopes.Profile, "OFFLINE_ACCESS", "other"], "127.0.0.1",
@@ -77,9 +77,9 @@ public class TokenServiceTest
     }
 
     [Fact]
-    public async Task CreatePrincipalForAuthorization_Member_WithoutOfflineAccess_HasNoScopes()
+    public async Task CreatePrincipalForAuthorization_MemberWithoutOfflineAccess_HasNoScopes()
     {
-        SetLookup(MemberLookupStatus.Member, "alice");
+        SetDiscordMember(MemberLookupStatus.Member, "alice");
 
         var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OpenId], "127.0.0.1",
             TestContext.Current.CancellationToken);
@@ -88,9 +88,9 @@ public class TokenServiceTest
     }
 
     [Fact]
-    public async Task CreatePrincipalForAuthorization_NotMember_IsAccessDenied_AndObserverIsNotCalled()
+    public async Task CreatePrincipalForAuthorization_NotMember_ReturnsAccessDeniedWithoutNotifyingObserver()
     {
-        SetLookup(MemberLookupStatus.NotMember);
+        SetDiscordMember(MemberLookupStatus.NotMember);
 
         var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OfflineAccess], "127.0.0.1",
             TestContext.Current.CancellationToken);
@@ -105,7 +105,7 @@ public class TokenServiceTest
     [Fact]
     public async Task CreatePrincipalForAuthorization_Unavailable_IsTemporarilyUnavailable()
     {
-        SetLookup(MemberLookupStatus.Unavailable);
+        SetDiscordMember(MemberLookupStatus.Unavailable);
 
         var result = await _service.CreatePrincipalForAuthorization(UserId, [Scopes.OfflineAccess], "127.0.0.1",
             TestContext.Current.CancellationToken);
@@ -118,7 +118,7 @@ public class TokenServiceTest
     [Fact]
     public async Task CreatePrincipalForRefresh_NotMember_IsInvalidGrant()
     {
-        SetLookup(MemberLookupStatus.NotMember);
+        SetDiscordMember(MemberLookupStatus.NotMember);
 
         var result = await _service.CreatePrincipalForRefresh(
             CreateRefreshPrincipal(UserId.ToString(), "old", Scopes.OfflineAccess), TestContext.Current.CancellationToken);
@@ -129,9 +129,9 @@ public class TokenServiceTest
     }
 
     [Fact]
-    public async Task CreatePrincipalForRefresh_Member_ReplacesNameWithLatest_KeepsSubAndScopes()
+    public async Task CreatePrincipalForRefresh_Member_ReplacesNameAndKeepsSubAndScopes()
     {
-        SetLookup(MemberLookupStatus.Member, "new-name");
+        SetDiscordMember(MemberLookupStatus.Member, "new-name");
 
         var result = await _service.CreatePrincipalForRefresh(
             CreateRefreshPrincipal(UserId.ToString(), "old-name", Scopes.OfflineAccess), TestContext.Current.CancellationToken);
@@ -160,13 +160,13 @@ public class TokenServiceTest
         var result = await _service.CreatePrincipalForRefresh(CreateRefreshPrincipal(sub, "x"), TestContext.Current.CancellationToken);
 
         Assert.Equal(Errors.InvalidGrant, Assert.IsType<TokenPrincipalResult.Rejected>(result).Error);
-        _discordService.Verify(l => l.GetMemberById(It.IsAny<ulong>()), Times.Never);
+        _discordService.Verify(d => d.GetMemberById(It.IsAny<ulong>()), Times.Never);
     }
 
     [Fact]
     public async Task CreatePrincipalForRefresh_Unavailable_IsTemporarilyUnavailable()
     {
-        SetLookup(MemberLookupStatus.Unavailable);
+        SetDiscordMember(MemberLookupStatus.Unavailable);
 
         var result = await _service.CreatePrincipalForRefresh(
             CreateRefreshPrincipal(UserId.ToString(), "old"), TestContext.Current.CancellationToken);

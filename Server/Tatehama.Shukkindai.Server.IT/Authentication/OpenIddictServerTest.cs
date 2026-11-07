@@ -24,7 +24,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task AccessToken_ValidatesStaticallyWithCerFile()
+    public async Task Token_AccessToken_ValidatesStaticallyWithPublicCer()
     {
         // Crew と TTC が行う静的検証そのもの
         var id = NewDiscordId();
@@ -59,7 +59,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Discovery_MatchesIssuer_AndJwksMatchesCer()
+    public async Task Discovery_Always_MatchesIssuerAndJwksMatchesCer()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "carol");
@@ -87,7 +87,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task OpenIdScope_IsNotSupported_AndRejectedAsInvalidScope()
+    public async Task Authorize_OpenIdScope_IsRejectedAsInvalidScope()
     {
         // openid を許すと、OpenIddict.Client が id_token を必須にしてクライアントがログインできなくなる
         var id = NewDiscordId();
@@ -104,7 +104,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task PkcePlain_IsRejected_AndDiscoveryAdvertisesS256Only()
+    public async Task Authorize_PkcePlain_IsRejectedAndDiscoveryAdvertisesS256Only()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "kate");

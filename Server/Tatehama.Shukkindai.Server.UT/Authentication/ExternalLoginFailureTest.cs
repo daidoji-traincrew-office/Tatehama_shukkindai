@@ -2,7 +2,7 @@ using Tatehama.Shukkindai.Server.Authentication;
 
 namespace Tatehama.Shukkindai.Server.UT.Authentication;
 
-public class ExternalLoginFailureTests
+public class ExternalLoginFailureTest
 {
     [Theory]
     [InlineData("access_denied", "access_denied")]
@@ -13,10 +13,10 @@ public class ExternalLoginFailureTests
     [InlineData("something_unknown", "server_error")]
     [InlineData("", "server_error")]
     [InlineData(null, "server_error")]
-    public void MapError_MapsOnlyDenialAndUnavailable(string? discordError, string expected) =>
+    public void MapError_DiscordError_MapsOnlyDenialAndUnavailable(string? discordError, string expected) =>
         Assert.Equal(expected, ExternalLoginFailure.MapError(discordError));
 
     [Fact]
-    public void Description_ForAccessDenied_IsReadableJapanese() =>
+    public void Description_AccessDenied_IsReadableJapanese() =>
         Assert.Equal("Discord での認可が拒否されました。", ExternalLoginFailure.Description("access_denied"));
 }

@@ -17,7 +17,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     private readonly WebApplicationFixture _factory = fixture;
 
     [Fact]
-    public async Task AuthorizationCodeFlow_IssuesJwsAccessToken_WithOnlySubAndNameClaims()
+    public async Task Authorize_Member_IssuesJwsAccessTokenWithOnlySubAndNameClaims()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "alice");
@@ -48,7 +48,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Refresh_ReturnsNewTokens_AndReflectsLatestUsername()
+    public async Task Token_RefreshGrant_ReturnsNewTokensWithLatestUsername()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "dave");
@@ -69,7 +69,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Revoke_ThenRefresh_IsInvalidGrant()
+    public async Task Token_RefreshAfterRevoke_IsInvalidGrant()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "erin");
@@ -91,7 +91,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Refresh_AfterLeavingTheGuild_IsInvalidGrant()
+    public async Task Token_RefreshAfterLeavingGuild_IsInvalidGrant()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "frank");
@@ -120,7 +120,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Authorize_BotNotReady_RedirectsWithTemporarilyUnavailable()
+    public async Task Authorize_DiscordNotSynchronized_RedirectsWithTemporarilyUnavailable()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "grace");
@@ -139,7 +139,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Refresh_BotNotReady_IsTemporarilyUnavailable()
+    public async Task Token_RefreshWhileDiscordNotSynchronized_IsTemporarilyUnavailable()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "heidi");
@@ -167,7 +167,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task OfflineAccessScope_IsGranted()
+    public async Task Token_OfflineAccessScope_IsGranted()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "ivan");
@@ -179,7 +179,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task PostAuthorize_KeepsParameters_AndLoginCookieIsHardened()
+    public async Task Authorize_Post_KeepsParametersAndHardensLoginCookie()
     {
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "leo");
@@ -243,7 +243,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     [InlineData("server_error", "server_error")]
     [InlineData("invalid_request", "server_error")]
     [InlineData("unknown_error", "server_error")]
-    public async Task DiscordConsentDenied_ReturnsErrorToClientRedirectUri_WithOriginalState(
+    public async Task DiscordCallback_ConsentDenied_ReturnsErrorToClientWithOriginalState(
         string discordError, string expectedError)
     {
         using var client = _factory.CreateIdpClient();
@@ -280,7 +280,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task DiscordLoginFailure_WithoutReturnUri_ShowsReadableMessage_AndNoCookie()
+    public async Task DiscordCallback_WithoutReturnUri_ShowsReadableMessageAndNoCookie()
     {
         // state token が検証できなかった場合など、戻り先が分からないときは、サーバー側でエラーを表示する
         using var client = _factory.CreateIdpClient();
@@ -294,7 +294,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task DiscordLoginFailure_WithNonLocalReturnUri_IsNotFollowed()
+    public async Task DiscordCallback_NonLocalReturnUri_IsNotFollowed()
     {
         // 戻り先が外部 URL なら、(state token 由来なので通常は起きないが)リダイレクトしない
         using var client = _factory.CreateIdpClient();
@@ -307,7 +307,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task RealCallbackScheme_ErrorFromDiscordWithInvalidState_ReachesControllerAsReadableMessage()
+    public async Task DiscordCallback_RealSchemeWithInvalidState_ShowsReadableMessage()
     {
         // テスト用 scheme に差し替えず、OpenIddict 本物の callback 処理を通す。
         // EnableErrorPassthrough が無いと、OpenIddict 自身の "error:invalid_token" が表示されて終わる

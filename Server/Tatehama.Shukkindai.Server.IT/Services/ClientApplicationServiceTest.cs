@@ -13,7 +13,7 @@ public sealed class ClientApplicationServiceTest(WebApplicationFixture fixture)
     private readonly WebApplicationFixture _factory = fixture;
 
     [Fact]
-    public async Task ClientRegistration_OverwritesStaleDescriptorInRealDb()
+    public async Task CreateOrUpdate_StaleDescriptorInRealDb_OverwritesIt()
     {
         using var client = _factory.CreateIdpClient();
         await client.GetAsync("healthz", Ct); // 起動(=登録)させる

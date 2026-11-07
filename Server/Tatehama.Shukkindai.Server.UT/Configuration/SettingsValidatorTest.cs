@@ -2,7 +2,7 @@ using Tatehama.Shukkindai.Server.Configuration;
 
 namespace Tatehama.Shukkindai.Server.UT.Configuration;
 
-public class SettingsValidatorTests
+public class SettingsValidatorTest
 {
     private static AuthenticationSettings Valid() => new()
     {
@@ -14,7 +14,7 @@ public class SettingsValidatorTests
         new AuthenticationSettingsValidator().Validate(null, s).Succeeded;
 
     [Fact]
-    public void ValidSettings_Succeed() => Assert.True(IsValid(Valid()));
+    public void Validate_ValidSettings_Succeeds() => Assert.True(IsValid(Valid()));
 
     [Theory]
     [InlineData(null)]
@@ -25,7 +25,7 @@ public class SettingsValidatorTests
     [InlineData("http://example.test/")]
     [InlineData("https://example.test")]
     [InlineData("https://example.test/path")]
-    public void InvalidIssuer_Fails(string? issuer)
+    public void Validate_InvalidIssuer_Fails(string? issuer)
     {
         var settings = Valid();
         settings.Issuer = issuer;
@@ -33,7 +33,7 @@ public class SettingsValidatorTests
     }
 
     [Fact]
-    public void NoPorts_Fails()
+    public void Validate_NoPorts_Fails()
     {
         var settings = Valid();
         settings.ClientRedirectPorts = [];
@@ -41,7 +41,7 @@ public class SettingsValidatorTests
     }
 
     [Fact]
-    public void Discord_AllRequired_EvenInDevelopment()
+    public void Validate_DiscordSettingMissingEvenInDevelopment_Fails()
     {
         var result = new DiscordSettingsValidator().Validate(null, new DiscordSettings());
 
@@ -53,7 +53,7 @@ public class SettingsValidatorTests
     }
 
     [Fact]
-    public void Discord_AllSet_Succeeds()
+    public void Validate_DiscordAllSet_Succeeds()
     {
         var result = new DiscordSettingsValidator().Validate(null, new DiscordSettings
         {

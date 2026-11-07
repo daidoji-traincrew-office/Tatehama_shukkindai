@@ -11,10 +11,10 @@ namespace Tatehama.Shukkindai.Server.UT.Authentication;
 /// そのため、Crew(OpenIddict 5.x)で必要だった iss パラメーターの回避ハンドラは不要になった。
 /// ネットワークには接続せず、その前提だけを固定する。落ちたらアップグレード後の挙動を確認すること。
 /// </summary>
-public class DiscordRegistrationTests
+public class DiscordRegistrationTest
 {
     [Fact]
-    public void DiscordRegistration_HasNoStaticConfiguration_AndUsesDiscoveryOfDiscord()
+    public void AddDiscord_NoStaticConfiguration_UsesDiscoveryOfDiscord()
     {
         var services = new ServiceCollection();
         services.AddOpenIddict().AddClient(options =>

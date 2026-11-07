@@ -14,7 +14,7 @@ public sealed class HealthzTest(WebApplicationFixture fixture)
     private readonly WebApplicationFixture _factory = fixture;
 
     [Fact]
-    public async Task Healthz_ReflectsBotReadiness()
+    public async Task Healthz_DiscordNotSynchronized_Returns503()
     {
         using var client = _factory.CreateIdpClient();
 
@@ -34,7 +34,7 @@ public sealed class HealthzTest(WebApplicationFixture fixture)
     }
 
     [Fact]
-    public async Task Healthz_Request_IsNotWrittenToHttpLogButOtherEndpointsAre()
+    public async Task Healthz_Request_IsNotWrittenToHttpLog()
     {
         // UseHttpLogging を UseRouting の前に置くと、エンドポイントごとの WithHttpLogging(None) が効かず、
         // 監視の /healthz が毎回ログに出てしまう。順序の修正を固定する
