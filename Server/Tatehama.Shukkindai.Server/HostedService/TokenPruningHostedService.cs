@@ -3,7 +3,7 @@ using Tatehama.Shukkindai.Server.Services;
 namespace Tatehama.Shukkindai.Server.HostedService;
 
 /// <summary>定期的に <see cref="ITokenPruningService"/> を呼ぶだけ。掃除の中身は Service にある。</summary>
-public class TokenPruningHostedService(IServiceScopeFactory scopeFactory) : BackgroundService
+public sealed class TokenPruningHostedService(IServiceScopeFactory scopeFactory) : BackgroundService
 {
     public static readonly TimeSpan Interval = TimeSpan.FromHours(6);
 

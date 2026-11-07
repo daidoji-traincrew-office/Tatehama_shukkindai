@@ -7,7 +7,7 @@ namespace Tatehama.Shukkindai.Server.HostedService;
 /// アプリの起動を止める。ASP.NET Core は hosted service の StartAsync が全部終わってから listen を始めるので、
 /// リクエストを受け付ける時点では、基本的にキャッシュは信用できる状態になっている。
 /// </summary>
-public class DiscordBotHostedService(DiscordRepository discordRepository) : IHostedService
+public sealed class DiscordBotHostedService(DiscordRepository discordRepository) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken) => discordRepository.Initialize(cancellationToken);
 

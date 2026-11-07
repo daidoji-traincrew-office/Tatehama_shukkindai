@@ -17,7 +17,7 @@ public interface IClientApplicationService
 /// 出勤台クライアント(public client)を登録する。既に登録済みでも、記述子で必ず上書きする。
 /// OpenIddict のマネージャーは Repository に相当するものとして、Service から直接使う。
 /// </summary>
-public class ClientApplicationService(
+public sealed class ClientApplicationService(
     IOpenIddictApplicationManager manager,
     IOptions<AuthenticationSettings> settings) : IClientApplicationService
 {

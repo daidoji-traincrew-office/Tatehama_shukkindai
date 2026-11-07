@@ -12,7 +12,7 @@ public interface ITokenPruningService
 /// 期限切れのトークンと、使われなくなった authorization を削除する。
 /// 閾値は refresh token の寿命(7日)より長くする。
 /// </summary>
-public class TokenPruningService(
+public sealed class TokenPruningService(
     IOpenIddictTokenManager tokenManager,
     IOpenIddictAuthorizationManager authorizationManager,
     TimeProvider timeProvider,

@@ -13,12 +13,13 @@ public interface ITokenService
         ulong discordUserId, IEnumerable<string> requestedScopes, string remoteIpAddress,
         CancellationToken cancellationToken);
 
+    /// <param name="cancellationToken">今は使っていない(メンバー確認が同期のキャッシュ参照のため)。Discord への問い合わせや DB が入ったときに署名を変えないよう、API として残す。</param>
     Task<TokenPrincipalResult> CreatePrincipalForRefresh(
         ClaimsPrincipal refreshTokenPrincipal, CancellationToken cancellationToken);
 }
 
 /// <summary>トークンに載せる principal を作る。判断はここに集め、コントローラーは HTTP の糊に徹する。</summary>
-public class TokenService(
+public sealed class TokenService(
     IDiscordService discordService,
     IUserLoginObserver observer,
     ILogger<TokenService> logger) : ITokenService

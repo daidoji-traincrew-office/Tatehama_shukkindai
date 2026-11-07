@@ -6,7 +6,7 @@ public interface IUserLoginObserver
     Task OnUserLoggedIn(ulong discordUserId, string username, CancellationToken cancellationToken);
 }
 
-public class NoOpUserLoginObserver : IUserLoginObserver
+public sealed class NoOpUserLoginObserver : IUserLoginObserver
 {
     public Task OnUserLoggedIn(ulong discordUserId, string username, CancellationToken cancellationToken) =>
         Task.CompletedTask;

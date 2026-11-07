@@ -11,7 +11,7 @@ public interface IHealthService
 /// readiness。DB に接続できて、Discord と同期できているときだけ healthy。
 /// 証明書の期限などは含めない(数ヶ月単位の話で、503 にするとかえって自分で障害を起こすため)。
 /// </summary>
-public class HealthService(
+public sealed class HealthService(
     IDatabaseRepository databaseRepository,
     IDiscordService discordService,
     ILogger<HealthService> logger) : IHealthService

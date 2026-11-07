@@ -22,20 +22,21 @@ public sealed class ClientApplicationServiceTest(WebApplicationFixture fixture)
         var manager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
         var application = (await manager.FindByClientIdAsync(ClientId, Ct))!;
 
-        // 古い記述子(リダイレクト URI が1つだけ、revocation 権限なし)で上書きしておく
-        var stale = new OpenIddictApplicationDescriptor();
-        await manager.PopulateAsync(stale, application, Ct);
-        stale.RedirectUris.Clear();
-        stale.RedirectUris.Add(new Uri("http://localhost:51180/"));
-        stale.Permissions.Remove(OpenIddictConstants.Permissions.Endpoints.Revocation);
-        await manager.UpdateAsync(application, stale, Ct);
-        var before = new OpenIddictApplicationDescriptor();
-        await manager.PopulateAsync(before, (await manager.FindByClientIdAsync(ClientId, Ct))!, Ct);
-        Assert.Single(before.RedirectUris);
-        Assert.DoesNotContain(OpenIddictConstants.Permissions.Endpoints.Revocation, before.Permissions);
-
+        // 古い記述子で上書きしたあとの処理は全部 try の中に入れる(途中で失敗しても、finally で最新の記述子に戻す)
         try
         {
+            // 古い記述子(リダイレクト URI が1つだけ、revocation 権限なし)で上書きしておく
+            var stale = new OpenIddictApplicationDescriptor();
+            await manager.PopulateAsync(stale, application, Ct);
+            stale.RedirectUris.Clear();
+            stale.RedirectUris.Add(new Uri("http://localhost:51180/"));
+            stale.Permissions.Remove(OpenIddictConstants.Permissions.Endpoints.Revocation);
+            await manager.UpdateAsync(application, stale, Ct);
+            var before = new OpenIddictApplicationDescriptor();
+            await manager.PopulateAsync(before, (await manager.FindByClientIdAsync(ClientId, Ct))!, Ct);
+            Assert.Single(before.RedirectUris);
+            Assert.DoesNotContain(OpenIddictConstants.Permissions.Endpoints.Revocation, before.Permissions);
+
             await scope.ServiceProvider.GetRequiredService<IClientApplicationService>().CreateOrUpdate(Ct);
 
             var after = new OpenIddictApplicationDescriptor();
