@@ -12,8 +12,8 @@ using Tatehama.Shukkindai.Server.Authentication;
 using Tatehama.Shukkindai.Server.Certificates;
 using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Data;
-using Tatehama.Shukkindai.Server.Discord;
 using Tatehama.Shukkindai.Server.HostedService;
+using Tatehama.Shukkindai.Server.Repositories.Discord;
 using Tatehama.Shukkindai.Server.Services;
 
 namespace Tatehama.Shukkindai.Server;
@@ -57,8 +57,9 @@ public class Program
 
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddControllers();
-        builder.Services.AddSingleton<DiscordMemberLookup>();
-        builder.Services.AddSingleton<IDiscordMemberLookup>(sp => sp.GetRequiredService<DiscordMemberLookup>());
+        builder.Services.AddSingleton<DiscordRepository>();
+        builder.Services.AddSingleton<IDiscordRepository>(sp => sp.GetRequiredService<DiscordRepository>());
+        builder.Services.AddSingleton<IDiscordService, DiscordService>();
         builder.Services.AddHostedService<DiscordBotHostedService>();
         builder.Services.AddScoped<IUserLoginObserver, NoOpUserLoginObserver>();
         builder.Services.AddScoped<TokenPrincipalService>();
@@ -93,7 +94,7 @@ public class Program
 
     private static void ConfigureEndpoints(WebApplication app)
     {
-        app.MapGet("/healthz", async (ApplicationDbContext db, IDiscordMemberLookup lookup, CancellationToken ct) =>
+        app.MapGet("/healthz", async (ApplicationDbContext db, IDiscordService discordService, CancellationToken ct) =>
             {
                 var databaseOk = false;
                 try
@@ -105,7 +106,7 @@ public class Program
                     app.Logger.LogError(e, "Health check: database connection failed.");
                 }
 
-                return databaseOk && lookup.IsReady
+                return databaseOk && discordService.IsReady()
                     ? Results.Ok()
                     : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             })

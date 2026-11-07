@@ -23,7 +23,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     {
         // Crew と TTC が行う静的検証そのもの
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "bob");
+        _factory.DiscordRepository.SetMember(id, "bob");
         using var client = _factory.CreateIdpClient();
         var token = await LoginAsync(client, id);
 
@@ -57,7 +57,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     public async Task Discovery_MatchesIssuer_AndJwksMatchesCer()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "carol");
+        _factory.DiscordRepository.SetMember(id, "carol");
         using var client = _factory.CreateIdpClient();
         var token = await LoginAsync(client, id);
 
@@ -86,7 +86,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     {
         // openid を許すと、OpenIddict.Client が id_token を必須にしてクライアントがログインできなくなる
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "judy");
+        _factory.DiscordRepository.SetMember(id, "judy");
         using var client = _factory.CreateIdpClient();
 
         var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
@@ -102,7 +102,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     public async Task PkcePlain_IsRejected_AndDiscoveryAdvertisesS256Only()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "kate");
+        _factory.DiscordRepository.SetMember(id, "kate");
         using var client = _factory.CreateIdpClient();
 
         var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);

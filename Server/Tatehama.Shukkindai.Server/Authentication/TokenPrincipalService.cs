@@ -1,7 +1,8 @@
 using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
-using Tatehama.Shukkindai.Server.Discord;
+using Tatehama.Shukkindai.Server.Models;
+using Tatehama.Shukkindai.Server.Services;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Tatehama.Shukkindai.Server.Authentication;
@@ -16,7 +17,7 @@ public abstract record TokenPrincipalResult
 
 /// <summary>トークンに載せる principal を作る。判断はここに集め、コントローラーは HTTP の糊に徹する。</summary>
 public sealed class TokenPrincipalService(
-    IDiscordMemberLookup lookup,
+    IDiscordService discordService,
     IUserLoginObserver observer,
     ILogger<TokenPrincipalService> logger)
 {
@@ -27,7 +28,7 @@ public sealed class TokenPrincipalService(
         ulong discordUserId, IEnumerable<string> requestedScopes, string remoteIpAddress,
         CancellationToken cancellationToken)
     {
-        var result = await lookup.LookupAsync(discordUserId, cancellationToken);
+        var result = await discordService.GetMemberById(discordUserId);
         switch (result.Status)
         {
             case MemberLookupStatus.NotMember:
@@ -65,7 +66,7 @@ public sealed class TokenPrincipalService(
             return new TokenPrincipalResult.Rejected(Errors.InvalidGrant, "refresh token が不正です。");
         }
 
-        var result = await lookup.LookupAsync(discordUserId, cancellationToken);
+        var result = await discordService.GetMemberById(discordUserId);
         switch (result.Status)
         {
             case MemberLookupStatus.NotMember:

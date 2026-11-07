@@ -4,7 +4,8 @@ using Microsoft.IdentityModel.Tokens;
 using Moq;
 using OpenIddict.Abstractions;
 using Tatehama.Shukkindai.Server.Authentication;
-using Tatehama.Shukkindai.Server.Discord;
+using Tatehama.Shukkindai.Server.Models;
+using Tatehama.Shukkindai.Server.Services;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Tatehama.Shukkindai.Server.UT.Authentication;
@@ -13,7 +14,7 @@ public class TokenPrincipalServiceTests
 {
     private const ulong UserId = 123456789012345678UL;
 
-    private readonly Mock<IDiscordMemberLookup> _lookup = new();
+    private readonly Mock<IDiscordService> _lookup = new();
     private readonly Mock<IUserLoginObserver> _observer = new();
     private readonly TokenPrincipalService _service;
 
@@ -24,7 +25,7 @@ public class TokenPrincipalServiceTests
     }
 
     private void SetLookup(MemberLookupStatus status, string? username = null) =>
-        _lookup.Setup(l => l.LookupAsync(UserId, It.IsAny<CancellationToken>()))
+        _lookup.Setup(l => l.GetMemberById(UserId))
             .ReturnsAsync(new MemberLookupResult(status, username));
 
     private static ClaimsPrincipal CreateRefreshPrincipal(string? sub, string name, params string[] scopes)
@@ -159,7 +160,7 @@ public class TokenPrincipalServiceTests
         var result = await _service.CreateForRefreshAsync(CreateRefreshPrincipal(sub, "x"), TestContext.Current.CancellationToken);
 
         Assert.Equal(Errors.InvalidGrant, Assert.IsType<TokenPrincipalResult.Rejected>(result).Error);
-        _lookup.Verify(l => l.LookupAsync(It.IsAny<ulong>(), It.IsAny<CancellationToken>()), Times.Never);
+        _lookup.Verify(l => l.GetMemberById(It.IsAny<ulong>()), Times.Never);
     }
 
     [Fact]

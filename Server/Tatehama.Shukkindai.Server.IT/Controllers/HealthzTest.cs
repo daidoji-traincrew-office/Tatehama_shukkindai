@@ -18,7 +18,7 @@ public sealed class HealthzTest(WebApplicationFixture fixture)
         var ok = await client.GetAsync("healthz", Ct);
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
 
-        _factory.Lookup.IsReady = false;
+        _factory.DiscordRepository.Ready = false;
         try
         {
             var notReady = await client.GetAsync("healthz", Ct);
@@ -26,7 +26,7 @@ public sealed class HealthzTest(WebApplicationFixture fixture)
         }
         finally
         {
-            _factory.Lookup.IsReady = true;
+            _factory.DiscordRepository.Ready = true;
         }
     }
 }

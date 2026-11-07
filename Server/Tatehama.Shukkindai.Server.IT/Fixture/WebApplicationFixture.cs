@@ -11,7 +11,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Tatehama.Shukkindai.Server.Authentication;
-using Tatehama.Shukkindai.Server.Discord;
+using Tatehama.Shukkindai.Server.HostedService;
+using Tatehama.Shukkindai.Server.Repositories.Discord;
 
 namespace Tatehama.Shukkindai.Server.IT.Fixture;
 
@@ -24,7 +25,7 @@ public sealed class WebApplicationFixture : WebApplicationFactory<Program>
     public string CertificateDirectory { get; } =
         Path.Combine(Path.GetTempPath(), "shukkindai-it-" + Guid.NewGuid());
 
-    public FakeDiscordMemberLookup Lookup { get; } = new();
+    public FakeDiscordRepository DiscordRepository { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -44,12 +45,12 @@ public sealed class WebApplicationFixture : WebApplicationFactory<Program>
             services.RemoveAll<DiscordBotHostedService>();
             foreach (var descriptor in services
                          .Where(d => d.ImplementationType == typeof(DiscordBotHostedService)
-                                     || d.ServiceType == typeof(IDiscordMemberLookup)).ToList())
+                                     || d.ServiceType == typeof(IDiscordRepository)).ToList())
             {
                 services.Remove(descriptor);
             }
 
-            services.AddSingleton<IDiscordMemberLookup>(Lookup);
+            services.AddSingleton<IDiscordRepository>(DiscordRepository);
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, TestDiscordAuthenticationHandler>(
                     TestDiscordAuthenticationHandler.SchemeName, _ => { });

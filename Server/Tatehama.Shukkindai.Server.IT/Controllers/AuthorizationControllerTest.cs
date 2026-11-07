@@ -20,7 +20,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task AuthorizationCodeFlow_IssuesJwsAccessToken_WithOnlySubAndNameClaims()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "alice");
+        _factory.DiscordRepository.SetMember(id, "alice");
         using var client = _factory.CreateIdpClient();
 
         var token = await LoginAsync(client, id);
@@ -51,11 +51,11 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task Refresh_ReturnsNewTokens_AndReflectsLatestUsername()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "dave");
+        _factory.DiscordRepository.SetMember(id, "dave");
         using var client = _factory.CreateIdpClient();
         var token = await LoginAsync(client, id);
 
-        _factory.Lookup.SetMember(id, "dave-renamed");
+        _factory.DiscordRepository.SetMember(id, "dave-renamed");
         var refreshed = await ReadTokenAsync(await RefreshAsync(client, token.RefreshToken!));
 
         Assert.NotEqual(token.AccessToken, refreshed.AccessToken);
@@ -72,7 +72,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task Revoke_ThenRefresh_IsInvalidGrant()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "erin");
+        _factory.DiscordRepository.SetMember(id, "erin");
         using var client = _factory.CreateIdpClient();
         var token = await LoginAsync(client, id);
 
@@ -94,11 +94,11 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task Refresh_AfterLeavingTheGuild_IsInvalidGrant()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "frank");
+        _factory.DiscordRepository.SetMember(id, "frank");
         using var client = _factory.CreateIdpClient();
         var token = await LoginAsync(client, id);
 
-        _factory.Lookup.RemoveMember(id);
+        _factory.DiscordRepository.RemoveMember(id);
         var refresh = await RefreshAsync(client, token.RefreshToken!);
 
         Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
@@ -123,10 +123,10 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task Authorize_BotNotReady_RedirectsWithTemporarilyUnavailable()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "grace");
+        _factory.DiscordRepository.SetMember(id, "grace");
         using var client = _factory.CreateIdpClient();
 
-        _factory.Lookup.IsReady = false;
+        _factory.DiscordRepository.Ready = false;
         try
         {
             var (location, _) = await AuthorizeAsync(client, id);
@@ -134,7 +134,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         }
         finally
         {
-            _factory.Lookup.IsReady = true;
+            _factory.DiscordRepository.Ready = true;
         }
     }
 
@@ -142,11 +142,11 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task Refresh_BotNotReady_IsTemporarilyUnavailable()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "heidi");
+        _factory.DiscordRepository.SetMember(id, "heidi");
         using var client = _factory.CreateIdpClient();
         var token = await LoginAsync(client, id);
 
-        _factory.Lookup.IsReady = false;
+        _factory.DiscordRepository.Ready = false;
         try
         {
             var refresh = await RefreshAsync(client, token.RefreshToken!);
@@ -158,7 +158,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         }
         finally
         {
-            _factory.Lookup.IsReady = true;
+            _factory.DiscordRepository.Ready = true;
         }
 
         // トークンは無効になっておらず、Ready に戻れば更新できる
@@ -170,7 +170,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task OfflineAccessScope_IsGranted()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "ivan");
+        _factory.DiscordRepository.SetMember(id, "ivan");
         using var client = _factory.CreateIdpClient();
 
         var token = await LoginAsync(client, id);
@@ -182,7 +182,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
     public async Task PostAuthorize_KeepsParameters_AndLoginCookieIsHardened()
     {
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "leo");
+        _factory.DiscordRepository.SetMember(id, "leo");
         using var client = _factory.CreateIdpClient();
         var (verifier, challenge) = NewPkce();
 
@@ -274,7 +274,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
 
         // 4. 失敗の印は SignOut されていて、同じクライアントの次のログインに残らない
         var id = NewDiscordId();
-        _factory.Lookup.SetMember(id, "after-denied");
+        _factory.DiscordRepository.SetMember(id, "after-denied");
         var token = await LoginAsync(client, id);
         Assert.Equal(id.ToString(), DecodePart(token.AccessToken, 1).GetProperty("sub").GetString());
     }
