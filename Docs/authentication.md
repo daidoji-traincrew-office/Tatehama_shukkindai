@@ -70,6 +70,7 @@ var parameters = new TokenValidationParameters
     ValidateAudience = false,           // aud は付かない
     ValidateLifetime = true,
     ValidateIssuerSigningKey = false,   // 鍵(証明書)の期限は見ない。下記
+    TryAllIssuerSigningKeys = false,    // header の kid が一致する鍵だけで検証する(総当たりしない)
     ValidTypes = ["at+jwt"],
 };
 var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, parameters);
@@ -162,8 +163,9 @@ token エンドポイントのエラーは、`invalid_grant` も `temporarily_un
 ## デプロイ時の人間の作業
 
 - Discord アプリのリダイレクト URI に `{issuer}auth/callback` を追加する。
-- Discord Developer Portal で、Bot の **Server Members Intent** を有効にする。Bot を対象のギルドに招待する(`Discord:GuildId` と一致させる。Bot がギルドにいない、または `Discord:GuildId` が違うと、起動に失敗する)。
+- Discord Developer Portal で、Bot の **Server Members Intent** を有効にする(無効だと Gateway に接続できず、**起動に失敗する**。メッセージは「Discord Gateway に接続できない(BotToken、Server Members Intent、ネットワークを確認)」)。Bot を対象のギルドに招待する(`Discord:GuildId` と一致させる。Bot がギルドにいない、または `Discord:GuildId` が違うと、起動に失敗する)。
 - DB に、`Server/Database/migrations/` を `atlas migrate apply` で適用する。
+- 初回のデプロイだけ、`Authentication__AllowCertificateBootstrap=true` を付けて起動し、鍵ができたことを確認してから外す(既定は false。用途のディレクトリが空だと、`cert/` のマウント漏れを疑って起動を止める。`Docs/certificate-rotation.md` の「初回のデプロイ」)。
 - `cert/` を永続化する(署名・暗号化の証明書が用途別に入り、公開鍵は `cert/public/` に入る。コンテナ作り直しで消えると、新しい鍵が作られ、全トークンが無効になる)。コンテナのユーザーが書き込めること。Crew と TTC には `cert/public/` だけを読み取り専用でマウントする(上の「Docker compose でのマウントの例」)。
 - OpenTelemetry を使うときは、`OTEL_EXPORTER_OTLP_ENDPOINT`(と `OTEL_SERVICE_NAME=tatehama-shukkindai`)を環境変数で渡す。未設定なら無効。メトリクスの内容とアラートは `Docs/certificate-rotation.md`。
 - リバースプロキシの IP を設定 `ProxyIP` に入れる。リバースプロキシは `X-Forwarded-Host` / `X-Forwarded-Proto` を、クライアントから来た値を素通しせず、自分で上書きすること(エンドポイントの URL とリダイレクト URI の組み立てに使われる)。

@@ -6,7 +6,9 @@
 
 - Crew と TTC は出勤台と**同じホスト**で動く。出勤台の `cert/public/`(`.cer` だけ)を読み取り専用でマウントして、検証鍵にする。人が `.cer` を配る工程は無い。
 - 証明書の切り替えは**再起動のときだけ**。動いているプロセスの OpenIddict の options は作り直さない。運転会をやっていないときに、人が手動で再起動する。
-- 有効な署名証明書が 1 つも無ければ、**起動を止める**(黙って新しい鍵を作って起動することはしない)。ただし初回(用途のディレクトリに証明書が 1 つも無い)は作って起動する。
+- 有効な署名証明書が 1 つも無ければ、**起動を止める**(黙って新しい鍵を作って起動することはしない)。
+- 用途のディレクトリに pfx が 1 つも無いとき(初回)も、**起動を止める**。鍵を作って起動するのは、設定 `Authentication:AllowCertificateBootstrap=true` を付けたときだけ(既定は false)。`cert/` のマウント漏れで空のボリュームになったとき、黙って新しい署名鍵で起動し、Crew と TTC が全員 401 になるのを防ぐため。次の鍵の自動生成(ローテーション)は、この設定に関係なく行う。
+- 署名は、`cert/public/` に**同じ内容の `.cer` がある鍵でしか署名しない**(Crew と TTC が一度も見ていない鍵では署名しない)。起動時に `public/` を同期できなければ、起動を止める。
 - インスタンスは 1 つ。複数にする場合の注意は「複数インスタンスにするとき」を参照。
 
 ## 用途と寿命
@@ -14,12 +16,13 @@
 | 用途 | 何に使うか | 寿命 | 次を作る時期 | 次の鍵の NotBefore | 古い鍵を消す時期 | 期限切れで止まるか |
 |---|---|---|---|---|---|---|
 | `server-signing` | アクセストークンの署名(JWKS と `cert/public/` で公開) | 2 年 | 最も遠い NotAfter まで残り 150 日 | 期限の 60 日前(未来。公開だけ先にする) | NotAfter + 7 日 | **起動時に止まる**(有効な鍵が無いとき) |
-| `server-encryption` | refresh token と authorization code の暗号化 | 2 年 | 残り 60 日 | すぐ(今 − 5 分) | NotAfter + 14 日 | 起動時に止まる(OpenIddict が拒否) |
+| `server-encryption` | refresh token と authorization code の暗号化 | 2 年 | 残り 60 日 | すぐ(今 − 5 分) | NotAfter + 14 日 | 起動時に止まる(有効な鍵が無く、作成にも失敗したとき。期限切れだけなら自動で作り直す) |
 | `client-signing` | Discord ログインの state token の署名 | 2 年 | 残り 60 日 | すぐ | NotAfter + 1 日 | 止まらない |
 | `client-encryption` | 同、暗号化 | 2 年 | 残り 60 日 | すぐ | NotAfter + 1 日 | 止まらない |
 
 - 暗号化の古い鍵を NotAfter + 14 日まで残すのは、それで暗号化された refresh token(寿命 7 日)を復号するため。期限切れの証明書でも、復号には使える。先に消すと、その refresh token は `invalid_grant` になり、利用者は再ログインになる。
 - Client 用の古い鍵を NotAfter + 1 日で消すのは、state token の寿命が 15 分だから。
+- 古い鍵を消すのは、NotAfter + 保持期間を過ぎ、**かつ、このプロセスの起動から保持期間がたっている**とき(両方)。再起動を長く怠ったあとの起動で、直前まで使っていた鍵(と `.cer`)を、起動の最初に消さないため。再起動の直後は、期限を過ぎた鍵も保持期間の間は残る。
 - 「最も遠い NotAfter」は、NotBefore が未来の鍵も含めて数える。次の鍵を作った後は、残りが約 2 年になるので、重複して作らない。
 
 ## 署名証明書のタイムライン
@@ -56,8 +59,18 @@ cert/                                            0700   Authentication:Certifica
 - `public/` には、署名用の pfx が残っている間の `.cer` だけを置く(現在の鍵、次の鍵、期限後 7 日以内の古い鍵)。pfx を消すと `.cer` も消える。pfx は決して `public/` に置かない。
 - ファイルは原子的に書く(同じディレクトリに `.{guid}.tmp` を書いて flush してから move)。`*.cer` は、完成したものか、存在しないかのどちらかしか見えない。`*.tmp` は読まれず、1 日以上前のものは自動で消える。
 - 起動のたびに、`public/` を署名用の pfx と照合する。`.cer` が無い・内容が違う場合は書き直し、余分な `.cer` は消す。
-- 権限が想定より緩いと、状態のログに `CertificatePermissionTooOpen`(7108)の Warning が出る。
+- 権限が想定より緩い(既存のディレクトリやファイルも含む。直しはしない)と、状態のログに `CertificatePermissionTooOpen`(7108)の Warning が出る。`public/` に `.cer` と一時ファイル以外(特に pfx)があれば、`UnexpectedPublicFile`(7113)の Warning が出る。
+- `Authentication:CertificateDirectory` が相対パスのときは、起動時に `CertificateDirectoryIsRelative`(7112)の Warning を、解決された絶対パスつきで出す。本番では絶対パスにすること。
 - Docker で bind mount するときは、ホスト側の `cert/` の所有者をコンテナのユーザー(`$APP_UID`、既定 1654)にする。例: `mkdir cert && sudo chown 1654:1654 cert && chmod 700 cert`。
+
+## 初回のデプロイ
+
+初回は `cert/` が空なので、鍵を作らせるために `Authentication:AllowCertificateBootstrap=true` を付けて起動する。
+
+1. `cert/` のホスト側ディレクトリを、コンテナのユーザー(UID 1654)の所有で作る: `mkdir idp-cert && sudo chown 1654:1654 idp-cert && chmod 700 idp-cert`。compose の `volumes` に `./idp-cert:/app/cert` があることを確かめる(書き忘れると空のボリュームになる)。
+2. `Authentication__AllowCertificateBootstrap=true` を付けて起動する。4 用途の鍵が作られ(`CertificateCreated` 7104 が Warning で 4 件)、`idp-cert/public/` に `.cer` が 1 つできる。
+3. **確認したら、`AllowCertificateBootstrap` を外して(または false にして)再起動する**。以後、`cert/` が空のまま起動すると、止まって知らせてくれる。
+4. Crew と TTC に `idp-cert/public/` を読み取り専用でマウントして起動する。
 
 ## 再起動の運用
 
@@ -67,7 +80,7 @@ cert/                                            0700   Authentication:Certifica
 
 - `RestartRequired`(7105)のログ、またはメトリクス `shukkindai.certificate.restart_required` が 1 になったら、次に運転会がない日に再起動する。
   - 署名: E-60 日から。期限(E)までの約 60 日が猶予。
-  - 暗号化・Client: 新しい鍵を作った翌日から(作ってから 60 日以内が目安)。
+  - 暗号化・Client: 新しい鍵を作った日から(作成は残り 60 日で、作った時点で使うべき鍵が切り替わる。24 時間以内にログに出る)。
 - 再起動を急ぐ目安は、使用中の鍵の残りが 30 日を切ったとき(7105 が Error になる)。
 - 再起動の前に、Crew と TTC が次の `.cer` を読み込み済みであること(切り替えの 90 日前に `public/` に置かれるので、通常は問題ない)。読み込み済みか分からないときは、Crew と TTC を先に再起動する。
 
@@ -94,7 +107,7 @@ cert/                                            0700   Authentication:Certifica
 | 7101 `CertificateStatus` | Information(証明書ごと) | `CertificatePurpose`、`CertificateThumbprint`、`CertificateState`(`Active`=使用中 / `Pending`=NotBefore が未来 / `Standby`=有効だが未使用 / `Expired`)、`NotBefore`、`NotAfter`、`RemainingDays` |
 | 7102 `CertificateSetStatus` | 下の表 | 用途ごと。`ActiveThumbprint`(このプロセスが使っている鍵)、`UsableUntil`、`RemainingDays`(使用中の鍵の残り)、`NewestNotAfter`、`NewestRemainingDays`(ディスク上で最も遠い NotAfter までの残り)、`SuccessorExists`(使用中の鍵より NotAfter が遠い、期限内の鍵がある) |
 | 7103 `NextSigningCertificatePending` | Information。切り替えまで 14 日以内なら Warning | 次の署名鍵がある間、毎日。`CertificateThumbprint`、`ActivatesAt`、`DaysUntilActivation`、`CerFileName` |
-| 7104 `CertificateCreated` | 署名の次の鍵は Warning(猶予が 14 日に満たなければ Error)。それ以外と初回は Information | `CertificatePurpose`、`CertificateThumbprint`、`NotBefore`、`NotAfter` |
+| 7104 `CertificateCreated` | 署名の次の鍵と、初回の生成(`AllowCertificateBootstrap`)は Warning(猶予が 14 日に満たなければ Error)。それ以外は Information | `CertificatePurpose`、`CertificateThumbprint`、`NotBefore`、`NotAfter` |
 | 7105 `RestartRequired` | Warning。使用中の鍵の残りが 30 日以内なら Error | 使うべき鍵と、プロセスが使っている鍵が違う。`CertificatePurpose`、`CertificateThumbprint`(使うべき鍵)、`PreviousThumbprint`(使用中)、`PreviousNotAfter`、`RemainingDays`。**毎日出る(再起動するまで)** |
 | 7106 `CertificateDeleted` | Information | `CertificatePurpose`、`CertificateThumbprint`、`NotAfter` |
 | 7107 `CertificateRotationFailed` | Error(例外つき) | `CertificatePurpose`(`server-signing` など、`public`、`all`) |
@@ -102,6 +115,8 @@ cert/                                            0700   Authentication:Certifica
 | 7109 `StartupCertificatesLoaded` | Information | 起動時、用途ごと。`CertificateCount`、`ActiveThumbprint` |
 | 7110 `NoValidSigningCertificate` | Critical | 有効な署名証明書が無く、起動を止めた(この直後に例外) |
 | 7111 `PublicCertificatesChanged` | Information | `public/` に書いた(`+`)・消した(`-`)`.cer` |
+| 7112 `CertificateDirectoryIsRelative` | Warning | `ConfiguredPath`、`ResolvedPath`(本番で相対パス) |
+| 7113 `UnexpectedPublicFile` | Warning | `FileName`(`public/` にある、`.cer` 以外のファイル) |
 
 7102 のレベル(何を人に知らせるかで決めている。再起動すれば済む話は、上げすぎない):
 
@@ -153,7 +168,7 @@ cert/                                            0700   Authentication:Certifica
 | B3 | 使用中の鍵が期限切れ | `shukkindai_certificate_remaining_time_seconds < 0` | 5m | Critical | 再起動(次の鍵があれば直る。無ければ手順書) |
 | C1 | ローテーションの成功が古い | `time() - shukkindai_certificate_rotation_last_success_timestamp_seconds > 3 * 86400` | 1h | Warning | 7107 のログを見る。ディスク・権限・ロック |
 | C2 | ローテーションの成功がとても古い | `time() - shukkindai_certificate_rotation_last_success_timestamp_seconds > 7 * 86400` | 5m | Critical | 同上 |
-| C3 | メトリクスが来ない(出勤台が止まっている、OTLP が届いていない) | `absent(shukkindai_certificate_rotation_last_success_timestamp_seconds)` | 30m | Critical | 出勤台のプロセスと OTLP の経路を確認する |
+| C3 | メトリクスが来ない(出勤台が止まっている、OTLP が届いていない。**起動時のローテーションが失敗した場合にも鳴る**: 最終成功時刻が一度も出ないため) | `absent(shukkindai_certificate_rotation_last_success_timestamp_seconds)` | 30m | Critical | 出勤台のプロセスと OTLP の経路を確認する |
 | D1 | 次の署名鍵の切り替えが近い | `shukkindai_certificate_next_signing_activation_time_seconds < 14 * 86400` | 1h | Info(または Warning) | Crew と TTC が次の `.cer` を読み込み済みか確認する。その後、再起動の計画 |
 
 補足:
@@ -201,14 +216,34 @@ sum(count_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | 
 
 ## 手順書(Runbook)
 
-用語: 「証明書のディレクトリ」は `cert/`(Docker では `/app/cert` にマウントしたもの)。以下のコマンドは、`Server/tools/` のスクリプト(.NET 10 の file-based app)を使う。`dotnet run Server/tools/inspect-cert.cs -- <ファイル>...` で kid と期限を、`dotnet run Server/tools/gen-cert.cs -- <purpose> <certDir> [notBefore] [years]` で、アプリと同じレイアウトの pfx を作れる。OpenSSL でも確認できる: `openssl x509 -in x.cer -inform der -noout -dates -fingerprint -sha1`(fingerprint の `:` を除いたものが kid)。
+用語: 「証明書のディレクトリ」は `cert/`(Docker では `/app/cert` にマウントしたホスト側のディレクトリ)。
+
+スクリプト(`Server/tools/`。.NET 10 の file-based app)は、Docker では次の形で実行する。**出勤台のコンテナのユーザー(UID 1654)で実行すること**。
+
+```
+# kid と期限(読み取りだけ)。<cert> はホスト側の cert ディレクトリ(例: ./idp-cert)
+docker run --rm -u 1654 -v "$PWD/idp-cert:/c:ro" -v "$PWD/Server/tools:/t:ro" mcr.microsoft.com/dotnet/sdk:10.0 \
+  sh -c 'dotnet run /t/inspect-cert.cs -- /c/server-signing/*.pfx /c/public/*.cer'
+
+# 鍵を作る(pfx だけ。:ro を付けない)
+docker run --rm -u 1654 -v "$PWD/idp-cert:/c" -v "$PWD/Server/tools:/t:ro" mcr.microsoft.com/dotnet/sdk:10.0 \
+  dotnet run /t/gen-cert.cs -- server-signing /c 2027-08-01T00:00:00Z
+```
+
+注意:
+- **所有者**: `-u 1654` を付けないと root で作られ、出勤台(UID 1654)が読めなくなる。root や `sudo` で `cert/` の中身を作った・コピーした場合は、`sudo chown -R 1654:1654 idp-cert` で直す(ディレクトリ 0700、pfx 0600、`public/` 0755、`.cer` 0644 を保つ)。出勤台が読めないと、`permission denied` のメッセージで起動に失敗する。
+- **グロブ**: `*.pfx` はシェルが展開する。上の例のように `sh -c '...'` の中に書けば、コンテナ側で展開される(コンテナの外で書くと、ホスト側のパスとして展開されて、何も一致しない)。
+- `gen-cert.cs` は、出勤台と同じく用途のディレクトリを 0700 で作り、一時ファイルに書いてから move し、`cert/.rotation.lock` を取る。寿命は出勤台と同じ 730 日。出勤台が動いているときに実行しても、ロックで直列化される。
+- ホストに .NET 10 SDK があるなら、`dotnet run Server/tools/inspect-cert.cs -- <ファイル>...` でも同じ(その場合も、所有者に注意)。
+- OpenSSL でも確認できる: `openssl x509 -in x.cer -inform der -noout -dates -fingerprint -sha1`(fingerprint の `:` を除いたものが kid)。
 
 ### 0. 事前確認(どの手順でも最初に)
 
-1. 今の証明書の一覧と期限を確かめる: `dotnet run Server/tools/inspect-cert.cs -- cert/server-signing/*.pfx cert/public/*.cer`。
+1. 今の証明書の一覧と期限を確かめる(上の `inspect-cert.cs` の `docker run`)。
 2. JWKS(`{issuer}.well-known/jwks`)の `kid` と一致することを確かめる。
 3. 出勤台のログで、直近の `CertificateSetStatus`(7102)と `RestartRequired`(7105)を見る。
-4. 作業前に `cert/` を丸ごとバックアップする(権限を保つ: `cp -a`)。バックアップは作業後に消す(秘密鍵のコピーを増やさない)。
+4. 作業前に `cert/` を丸ごとバックアップする(権限を保つ: `sudo cp -a idp-cert idp-cert.bak`)。バックアップは作業後に消す(秘密鍵のコピーを増やさない)。
+   - **バックアップから戻すときは、`cert/` ディレクトリそのものを `mv` や `rm -rf` で差し替えない**。Crew と TTC が `cert/public` を bind mount していると、差し替え前の古い inode を指したままになり、新しい `.cer` が見えない。出勤台を止めて、**中身だけ**を戻す: `sudo rsync -a --delete idp-cert.bak/ idp-cert/`(rsync が無ければ、`find idp-cert -mindepth 1 -delete` のあと `sudo cp -a idp-cert.bak/. idp-cert/`)。戻したあと、所有者(1654)と権限を確かめ、Crew と TTC を再起動する(マウントを張り直す)。
 
 ### 1. 通常の再起動(切り替え)
 
@@ -222,7 +257,7 @@ sum(count_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | 
 
 1. 出勤台を停止する。
 2. `cert/server-signing/` の pfx を全部消す(漏洩した鍵だけでなく、次の鍵も新しく作り直すほうが安全。次の鍵が漏洩していないと言い切れるなら、それは残してよい)。
-3. 出勤台を起動する。ディレクトリが空なので、**すぐ有効な新しい鍵**が作られ、`cert/public/` の `.cer` が入れ替わる(古い `.cer` は消える)。ログに `CertificateCreated`(7104、初回)と `PublicCertificatesChanged`(7111)が出る。
+3. `Authentication__AllowCertificateBootstrap=true` を付けて出勤台を起動する(ディレクトリが空だと、これが無いと起動しない)。**すぐ有効な新しい鍵**が作られ、`cert/public/` の `.cer` が入れ替わる(古い `.cer` は消える)。ログに `CertificateCreated`(7104、初回)と `PublicCertificatesChanged`(7111)が出る。確認したら、この設定を外して再起動する。
 4. Crew と TTC に新しい `.cer` を読み込ませる(再起動)。古い `.cer` を信頼しなくなるので、漏洩した鍵で作られた偽のトークンは通らなくなる。
 5. 利用者は、出勤台クライアントで取り直す(refresh で新しいアクセストークンが出る)。
 
@@ -258,7 +293,7 @@ sum(count_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | 
 
 1. 例外メッセージのパスのファイルを、別の場所へ移す(`.pfx` 以外の拡張子にしてもよい。調査後に消す)。
 2. 出勤台を再起動する。残りの有効な鍵で起動し、足りない用途は自動で作られる。
-3. 署名の pfx が 1 つも残らなかった場合は、「全部期限切れで起動しないとき」と同じ扱い(新しい鍵が作られる。Crew/TTC は読み込み直しが必要)。
+3. 署名の pfx が 1 つも残らなかった場合は、「全部期限切れで起動しないとき」と同じ扱い(`AllowCertificateBootstrap=true` で新しい鍵を作る。Crew/TTC は読み込み直しが必要)。
 
 ### 6. 全部期限切れで起動しないとき
 
@@ -269,20 +304,24 @@ sum(count_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | 
 1. 「0. 事前確認」で、期限を確かめ、`cert/` をバックアップする。
 2. 古い鍵を使い続けたい理由が無ければ(通常は無い)、`cert/server-signing/` の pfx をすべて別の場所へ移す。
    - NotBefore が未来の鍵だけが残っている場合は、その NotBefore を待つか、同じく移す。
-3. 出勤台を起動する。ディレクトリが空なので、**すぐ有効な新しい鍵**が作られる。`cert/public/` の `.cer` も入れ替わる。
+3. `Authentication__AllowCertificateBootstrap=true` を付けて出勤台を起動する(ディレクトリが空なので、これが必要)。**すぐ有効な新しい鍵**が作られ、`cert/public/` の `.cer` も入れ替わる。確認したら、この設定を外して再起動する。
 4. Crew と TTC を再起動して、新しい `.cer` を読み込ませる。それまで Crew と TTC は 401 になる。
 5. 利用者は、出勤台クライアントで再ログイン(または refresh)する。
 6. 移した古い pfx は、不要になったら安全に消す。
 
-暗号化(`server-encryption`)の pfx が全部期限切れの場合は、自動で新しい鍵が作られて起動する(署名と違い、外部に配る必要が無いため)。古い鍵で暗号化された refresh token は、保持期間内(NotAfter + 14 日)なら復号できる。
+暗号化(`server-encryption`)の pfx が全部期限切れの場合は(ディレクトリが空でなければ)、自動で新しい鍵が作られて起動する(署名と違い、外部に配る必要が無いため)。古い鍵で暗号化された refresh token は、保持期間内(NotAfter + 14 日)なら復号できる。
 
 ### 7. 次の署名鍵を手動で作る(特殊な場合)
 
-自動生成を待たずに、NotBefore を指定した鍵を作りたいとき。
+通常は自動生成に任せる。どうしても手作業で作る場合の注意:
 
-1. `dotnet run Server/tools/gen-cert.cs -- server-signing <certDir> 2027-08-01T00:00:00Z` で pfx を作る(NotBefore を過去にすれば、すぐ有効)。
-2. 出勤台を停止/再起動する。起動時に、`public/` の `.cer` が書かれる。
+- **NotBefore は「今 + 14 日以上」にする**。NotBefore を過去にした鍵は、再起動したその場で切り替わる(最も遠い NotAfter の有効な鍵が選ばれるため)。`.cer` も起動時に初めて `public/` に置かれるので、Crew と TTC はその鍵を一度も見ないまま署名が始まり、全部 401 になる。
+- 出勤台側では、`public/` に同じ内容の `.cer` が無い鍵では署名しないので、`.cer` を置けなかった場合は起動が止まる(Crew/TTC が 401 になる状態にはならない)。ただし、`.cer` が置かれた直後に切り替わるのは同じなので、NotBefore を過去にするのはやはり避ける。
+
+1. `docker run`(上の `gen-cert.cs`)で、`server-signing <certDir> <今 + 14 日以上の ISO 8601>` を指定して pfx を作る。
+2. 出勤台を再起動する。起動時に、`public/` の `.cer` が書かれる(切り替え前に Crew/TTC が読み込める)。
 3. JWKS に新しい kid が**増えていること**、新しくログインして得たトークンの kid が、NotBefore 前は古いままであることを確かめる。
+4. Crew と TTC が新しい `.cer` を読み込んでから、NotBefore を迎え、出勤台を再起動する。
 
 ### 複数インスタンスにするとき(現状は想定しない)
 
@@ -299,3 +338,9 @@ sum(count_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | 
 - `HostedService/CertificateRotationHostedService.cs`: Kestrel が listen する前に証明書をそろえ(OpenIddict の options もここで作る)、24 時間ごとに `Maintain` を呼ぶ
 - `Services/CertificateMetrics.cs`、`Services/CertificateLog.cs`: メトリクスとログ
 - OpenIddict の挙動(複数の証明書、NotBefore が未来の鍵、options の作り直しが 1 回だけであること)は、調査報告をもとにしている。OpenIddict を上げたときは、IT(`CertificateRotationTest`)で挙動が変わっていないか確かめること。
+
+## 既知の制約
+
+- 署名鍵の残りが 1 日以下の状態で起動すると、作った鍵の NotBefore が「今 − 5 分」になり、起動したその場で新しい鍵に切り替わる(古い鍵と新しい鍵の両方が無効な隙間を作らないため)。`.cer` は起動時に同時に置かれるが、Crew/TTC が読み込む前に切り替わるので、読み込むまで 401 になる。署名の残りが 1 日になる前に、アラート(A1・A2)で気づいて対応すること。
+- 複数インスタンスは想定しない(「複数インスタンスにするとき」の注意を満たす必要がある)。ロックは同じホストのプロセス間でしか効かないことがある。
+- `AlwaysDownloadUsers` で全メンバーを取得している最中にメンバーが抜けると、Discord.Net の `HasAllMembers` が早く true になりうる(1000 人未満のギルドでは起きない)。
