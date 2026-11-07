@@ -79,8 +79,9 @@ public class Program
             app.UseHsts();
         }
 
-        app.UseHttpLogging();
         app.UseRouting();
+        // WithHttpLogging(エンドポイントごとの設定)は、エンドポイントが決まった後(UseRouting の後)でないと効かない
+        app.UseHttpLogging();
         app.UseAuthentication();
         app.UseAuthorization();
     }
