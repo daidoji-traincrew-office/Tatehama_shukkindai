@@ -25,7 +25,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "bob");
         using var client = _factory.CreateIdpClient();
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         using var cer = LoadCer();
         Assert.False(cer.HasPrivateKey);
@@ -59,7 +59,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "carol");
         using var client = _factory.CreateIdpClient();
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
         Assert.Equal(WebApplicationFixture.Issuer, discovery.GetProperty("issuer").GetString());
@@ -93,7 +93,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
         Assert.Equal(["offline_access"],
             discovery.GetProperty("scopes_supported").EnumerateArray().Select(e => e.GetString()));
 
-        var response = await SendAuthorizeAsync(client, id, "openid offline_access", "S256");
+        var response = await SendAuthorize(client, id, "openid offline_access", "S256");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("invalid_scope", await response.Content.ReadAsStringAsync(Ct));
     }
@@ -109,7 +109,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
         Assert.Equal(["S256"],
             discovery.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(e => e.GetString()));
 
-        var response = await SendAuthorizeAsync(client, id, "offline_access", "plain");
+        var response = await SendAuthorize(client, id, "offline_access", "plain");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("invalid_request", await response.Content.ReadAsStringAsync(Ct));
     }

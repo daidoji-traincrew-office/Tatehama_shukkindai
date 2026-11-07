@@ -23,7 +23,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         _factory.DiscordRepository.SetMember(id, "alice");
         using var client = _factory.CreateIdpClient();
 
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         // JWS(ドットが2つ。暗号化されていない)
         Assert.Equal(2, token.AccessToken.Count(c => c == '.'));
@@ -53,10 +53,10 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "dave");
         using var client = _factory.CreateIdpClient();
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         _factory.DiscordRepository.SetMember(id, "dave-renamed");
-        var refreshed = await ReadTokenAsync(await RefreshAsync(client, token.RefreshToken!));
+        var refreshed = await ReadToken(await Refresh(client, token.RefreshToken!));
 
         Assert.NotEqual(token.AccessToken, refreshed.AccessToken);
         Assert.False(string.IsNullOrEmpty(refreshed.RefreshToken));
@@ -74,7 +74,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "erin");
         using var client = _factory.CreateIdpClient();
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         var revoke = await client.PostAsync("connect/revoke", new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -84,7 +84,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         }), Ct);
         Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
 
-        var refresh = await RefreshAsync(client, token.RefreshToken!);
+        var refresh = await Refresh(client, token.RefreshToken!);
         Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
         var json = await refresh.Content.ReadFromJsonAsync<JsonElement>(Ct);
         Assert.Equal("invalid_grant", json.GetProperty("error").GetString());
@@ -96,10 +96,10 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "frank");
         using var client = _factory.CreateIdpClient();
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         _factory.DiscordRepository.RemoveMember(id);
-        var refresh = await RefreshAsync(client, token.RefreshToken!);
+        var refresh = await Refresh(client, token.RefreshToken!);
 
         Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
         var json = await refresh.Content.ReadFromJsonAsync<JsonElement>(Ct);
@@ -112,7 +112,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         var id = NewDiscordId(); // メンバーに登録しない
         using var client = _factory.CreateIdpClient();
 
-        var (location, _) = await AuthorizeAsync(client, id);
+        var (location, _) = await Authorize(client, id);
 
         Assert.StartsWith(RedirectUri, location.AbsoluteUri);
         Assert.Equal("access_denied", QueryValue(location, "error"));
@@ -129,7 +129,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         _factory.DiscordRepository.Ready = false;
         try
         {
-            var (location, _) = await AuthorizeAsync(client, id);
+            var (location, _) = await Authorize(client, id);
             Assert.Equal("temporarily_unavailable", QueryValue(location, "error"));
         }
         finally
@@ -144,12 +144,12 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "heidi");
         using var client = _factory.CreateIdpClient();
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         _factory.DiscordRepository.Ready = false;
         try
         {
-            var refresh = await RefreshAsync(client, token.RefreshToken!);
+            var refresh = await Refresh(client, token.RefreshToken!);
             var body = await refresh.Content.ReadAsStringAsync(Ct);
             // token エンドポイントは invalid_grant などと同じく 400 で返す
             Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
@@ -162,7 +162,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         }
 
         // トークンは無効になっておらず、Ready に戻れば更新できる
-        var again = await RefreshAsync(client, token.RefreshToken!);
+        var again = await Refresh(client, token.RefreshToken!);
         Assert.True(again.IsSuccessStatusCode, await again.Content.ReadAsStringAsync(Ct));
     }
 
@@ -173,7 +173,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         _factory.DiscordRepository.SetMember(id, "ivan");
         using var client = _factory.CreateIdpClient();
 
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
 
         Assert.Equal("offline_access", token.Scope);
     }
@@ -215,7 +215,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         var second = await client.GetAsync(first.Headers.Location, Ct);
         Assert.Equal(HttpStatusCode.Found, second.StatusCode);
         var code = QueryValue(second.Headers.Location!, "code");
-        var token = await ReadTokenAsync(await PostTokenAsync(client, new Dictionary<string, string>
+        var token = await ReadToken(await PostToken(client, new Dictionary<string, string>
         {
             ["grant_type"] = "authorization_code",
             ["client_id"] = ClientId,
@@ -226,7 +226,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         Assert.Equal(id.ToString(), DecodePart(token.AccessToken, 1).GetProperty("sub").GetString());
     }
 
-    private static async Task<HttpResponseMessage> StartDeniedLoginAsync(HttpClient client, string discordError)
+    private static async Task<HttpResponseMessage> StartDeniedLogin(HttpClient client, string discordError)
     {
         var (_, challenge) = NewPkce();
         using var request = new HttpRequestMessage(HttpMethod.Get,
@@ -249,7 +249,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         using var client = _factory.CreateIdpClient();
 
         // 1. authorize → 外部ログイン(拒否)→ callback
-        var toCallback = await StartDeniedLoginAsync(client, discordError);
+        var toCallback = await StartDeniedLogin(client, discordError);
         Assert.True(toCallback.StatusCode == HttpStatusCode.Found, "step1: " + await toCallback.Content.ReadAsStringAsync(Ct));
         Assert.StartsWith("/auth/callback", toCallback.Headers.Location!.OriginalString);
 
@@ -275,7 +275,7 @@ public sealed class AuthorizationControllerTest(WebApplicationFixture fixture)
         // 4. 失敗の印は SignOut されていて、同じクライアントの次のログインに残らない
         var id = NewDiscordId();
         _factory.DiscordRepository.SetMember(id, "after-denied");
-        var token = await LoginAsync(client, id);
+        var token = await Login(client, id);
         Assert.Equal(id.ToString(), DecodePart(token.AccessToken, 1).GetProperty("sub").GetString());
     }
 

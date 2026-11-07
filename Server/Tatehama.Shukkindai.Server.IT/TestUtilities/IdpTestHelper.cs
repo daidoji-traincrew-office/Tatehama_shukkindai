@@ -29,7 +29,7 @@ public static class IdpTestHelper
     }
 
     /// <summary>authorize を最後まで進め、クライアントのリダイレクト先(302 の Location)を返す。</summary>
-    public static async Task<(Uri Location, string Verifier)> AuthorizeAsync(HttpClient client, ulong discordId,
+    public static async Task<(Uri Location, string Verifier)> Authorize(HttpClient client, ulong discordId,
         string scope = "offline_access",
         string challengeMethod = "S256")
     {
@@ -51,7 +51,7 @@ public static class IdpTestHelper
         return (secondResponse.Headers.Location!, verifier);
     }
 
-    public static async Task<HttpResponseMessage> SendAuthorizeAsync(HttpClient client, ulong discordId,
+    public static async Task<HttpResponseMessage> SendAuthorize(HttpClient client, ulong discordId,
         string scope, string challengeMethod)
     {
         var (_, challenge) = NewPkce();
@@ -64,10 +64,10 @@ public static class IdpTestHelper
         return await client.SendAsync(request, Ct);
     }
 
-    public static async Task<HttpResponseMessage> PostTokenAsync(HttpClient client, Dictionary<string, string> form) =>
+    public static async Task<HttpResponseMessage> PostToken(HttpClient client, Dictionary<string, string> form) =>
         await client.PostAsync("connect/token", new FormUrlEncodedContent(form), Ct);
 
-    public static async Task<TokenResponse> ReadTokenAsync(HttpResponseMessage response)
+    public static async Task<TokenResponse> ReadToken(HttpResponseMessage response)
     {
         var body = await response.Content.ReadAsStringAsync(Ct);
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
@@ -80,16 +80,16 @@ public static class IdpTestHelper
             root.TryGetProperty("scope", out var s) ? s.GetString() : null);
     }
 
-    public static async Task<TokenResponse> LoginAsync(HttpClient client, ulong discordId)
+    public static async Task<TokenResponse> Login(HttpClient client, ulong discordId)
     {
-        var (location, verifier) = await AuthorizeAsync(client, discordId);
+        var (location, verifier) = await Authorize(client, discordId);
         var query = System.Web.HttpUtility.ParseQueryString(location.Query);
         Assert.Equal("http://localhost:51180/", location.GetLeftPart(UriPartial.Path));
         Assert.Equal("xyz", query["state"]);
         var code = query["code"];
         Assert.False(string.IsNullOrEmpty(code), "authorization code が無い: " + location);
 
-        var response = await PostTokenAsync(client, new Dictionary<string, string>
+        var response = await PostToken(client, new Dictionary<string, string>
         {
             ["grant_type"] = "authorization_code",
             ["client_id"] = ClientId,
@@ -97,11 +97,11 @@ public static class IdpTestHelper
             ["redirect_uri"] = RedirectUri,
             ["code_verifier"] = verifier,
         });
-        return await ReadTokenAsync(response);
+        return await ReadToken(response);
     }
 
-    public static Task<HttpResponseMessage> RefreshAsync(HttpClient client, string refreshToken) =>
-        PostTokenAsync(client, new Dictionary<string, string>
+    public static Task<HttpResponseMessage> Refresh(HttpClient client, string refreshToken) =>
+        PostToken(client, new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
             ["client_id"] = ClientId,
