@@ -57,7 +57,10 @@ public class SettingsValidatorTests
     {
         var result = new DiscordSettingsValidator().Validate(null, new DiscordSettings
         {
-            ClientId = "a", ClientSecret = "b", BotToken = "c", GuildId = 1,
+            ClientId = "a",
+            ClientSecret = "b",
+            BotToken = "c",
+            GuildId = 1,
         });
 
         Assert.True(result.Succeeded);
