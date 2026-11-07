@@ -13,6 +13,7 @@ using Tatehama.Shukkindai.Server.Certificates;
 using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Data;
 using Tatehama.Shukkindai.Server.HostedService;
+using Tatehama.Shukkindai.Server.Repositories.Database;
 using Tatehama.Shukkindai.Server.Repositories.Discord;
 using Tatehama.Shukkindai.Server.Services;
 
@@ -64,6 +65,8 @@ public class Program
         builder.Services.AddScoped<IUserLoginObserver, NoOpUserLoginObserver>();
         builder.Services.AddScoped<ITokenService, TokenService>();
         builder.Services.AddScoped<IClientApplicationService, ClientApplicationService>();
+        builder.Services.AddScoped<IDatabaseRepository, DatabaseRepository>();
+        builder.Services.AddScoped<IHealthService, HealthService>();
         builder.Services.AddScoped<ITokenPruningService, TokenPruningService>();
         builder.Services.AddHostedService<TokenPruningHostedService>();
     }
@@ -94,22 +97,10 @@ public class Program
 
     private static void ConfigureEndpoints(WebApplication app)
     {
-        app.MapGet("/healthz", async (ApplicationDbContext db, IDiscordService discordService, CancellationToken ct) =>
-            {
-                var databaseOk = false;
-                try
-                {
-                    databaseOk = await db.Database.CanConnectAsync(ct);
-                }
-                catch (Exception e) when (e is not OperationCanceledException)
-                {
-                    app.Logger.LogError(e, "Health check: database connection failed.");
-                }
-
-                return databaseOk && discordService.IsReady()
+        app.MapGet("/healthz", async (IHealthService healthService, CancellationToken ct) =>
+                await healthService.IsHealthy(ct)
                     ? Results.Ok()
-                    : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-            })
+                    : Results.StatusCode(StatusCodes.Status503ServiceUnavailable))
             .AllowAnonymous()
             .WithHttpLogging(HttpLoggingFields.None);
         app.MapControllers();
