@@ -117,6 +117,17 @@ services:
 - 使用済みの refresh token の再使用は、OpenIddict 既定の猶予(30秒)までしか許されない。猶予を過ぎて再使用すると、不正な再利用とみなされ、同じ authorization のトークンが連鎖して失効しうる(OpenIddict の挙動。この実装では変更していない)。更新結果を保存する前にクラッシュした場合などに備え、更新と保存は1か所で直列に行うこと。
 - **refresh は出勤台クライアントだけが行う。** 他のアプリ(ATS など)には、アクセストークンだけを渡すこと(refresh token は渡さない)。
 
+## 他のアプリへのトークンの渡し方(ATS など)
+
+出勤台クライアントが、アクセストークンだけを DPAPI で暗号化したファイルに書き出し、他のアプリ(ATS: .NET 8 + WinForms)がそれを読む。前提: 両方が同じ Windows ユーザー(一般ユーザー)で動く。**実装は Client のリポジトリ側で行う(この文書は契約)。**
+
+- 暗号化: `ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser)`。`LocalMachine` は使わない(同じ PC の全ユーザーが復号できてしまう)。
+- 中身(暗号化前): UTF-8 の JSON。`{"version":1,"access_token":"...","expires_at":<exp の Unix 秒>}`。**refresh token は入れない**(refresh token は rolling なので、他のアプリが読んで使うと、クライアントの保存内容が古くなり、同じ authorization のトークンが連鎖して失効しうる)。
+- 保存先とファイル名: 具体的な場所(例: `%LOCALAPPDATA%\Tatehama.Shukkindai\access-token.bin`)は Client 実装時に決めて、ここに追記する。refresh token のファイルとは別にする。
+- 書き込み(クライアント): 同じディレクトリの一時ファイルに書いてから置き換える(アトミックに)。アクセストークンの期限(1時間)の前(例: 10 分前)に書き直す。ログアウト時はファイルを削除する。
+- 読み取り(他のアプリ): 読み取りに失敗したら少し待って再試行する。`expires_at` を過ぎていたら使わず、「出勤台クライアントを起動してください」と案内して、ファイルの更新を待つ(`FileSystemWatcher` か数秒ごとの再読み込み)。トークンを検証するのは各サービス側(署名公開鍵は上の節)。他のアプリは自分ではログインしない。
+- `version` が知らない値のときは読み込まない。形式を変えるときは `version` を上げる。
+
 ## エラー
 
 | 場面 | error | 意味 | クライアントの動作 |
