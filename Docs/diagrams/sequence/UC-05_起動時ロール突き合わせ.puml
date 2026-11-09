@@ -1,0 +1,51 @@
+@startuml UC-05
+!include ../common/style.iuml
+title UC-05 Bot起動時に全メンバーのロールを突き合わせる
+autonumber
+participant "Discord" as Discord
+participant "Discord Bot" as Bot
+participant "APIサーバー" as API
+database "DB" as DB
+
+alt 起動・再接続時
+  Bot -> Bot : Discordへの接続完了
+else 1日1回（期限処理の前：Q-05-2 推奨案）
+  Bot -> Bot : 定期実行
+end
+Bot -> Discord : 全メンバーと記録対象ロールを取得
+alt E1 取得しきれない（レート制限・タイムアウト）
+  Discord --> Bot : 一部のみ / エラー
+  Bot -> Bot : 記録を変えずに全体を中止（I-6）\n時間をおいて再実行
+else 取得成功
+  Discord --> Bot : 全メンバー一覧
+end
+Bot -> API : 在籍ユーザーと保有中ロールを要求
+API -> DB : 取得
+API --> Bot : 記録上の状態
+Bot -> Bot : メンバーごとに差分を求める\n・付与の見逃し\n・削除の見逃し\n・在籍なのにサーバーにいない\n・退会済みなのにサーバーにいる
+note right of Bot
+  E3 突き合わせ中に受け取ったリアルタイムイベント（UC-04）は
+  ユーザー単位で直列化するか、突き合わせ後に処理する。
+end note
+Bot -> API : 差分をまとめて送信
+group APIの処理
+  API -> DB : 付与の見逃し →「保有開始」（検知方法=起動時の突き合わせ）
+  API -> DB : 削除の見逃し → 保有中の記録を閉じる
+  note right of DB
+    日時は監査ログから取れればその日時、
+    取れなければ突き合わせた日時（Q-05-1 推奨案）。
+    A1 導入直後は全員が付与の見逃しになり、
+    見習いの起点はBotが初めて確認した日（D-4）。
+  end note
+  API -> API : サーバーにいない在籍者 → UC-03 退会
+  API -> API : サーバーにいる退会済み → UC-03 再入会
+  API -> API : 変化があった人について UC-06 矛盾判定
+  API -> DB : 実行日時・差分件数をログに残す
+end
+alt E2 書き込めない
+  API --> Bot : エラー
+  Bot -> Bot : その回は中止して再試行
+else
+  API --> Bot : OK（差分はログのみ：Q-05-3 推奨案）
+end
+@enduml

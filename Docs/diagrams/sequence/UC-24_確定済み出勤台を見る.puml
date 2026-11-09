@@ -1,0 +1,33 @@
+@startuml UC-24
+!include ../common/style.iuml
+title UC-24 確定済み出勤台を見る
+autonumber
+actor "ログイン利用者\n(全員：D-3)" as User
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+
+User -> App : 確定済み運転会の一覧を開く（A/B・開催日で絞り込み）
+App -> API : GET 確定済み運転会一覧（A/Bとも含む：Q-24-3 推奨案）
+API --> App : 一覧
+alt A1 なし
+  App -> User : 「確定済みの運転会はありません」
+else
+  User -> App : 運転会を1つ選ぶ（または UC-23 から遷移）
+  App -> API : GET 確定済み出勤台（運転会ID）
+  alt E1 セッション切れ / 最低バージョン未満
+    API --> App : 401 / 426
+  else E2 未確定の運転会
+    API --> App : 404（編集中の出勤台は UC-17 / UC-20）
+  else
+    API -> DB : アーカイブを取得
+    API --> App : 運転会（名前・A/B・開催日・主催者・共同主催者）\nダイヤ名（アーカイブ）\n行路：列車番号リスト・列車ごとの担当者・見習いと指導員の組\n信号：区割り・時間帯・担当者・組\n指令：時間帯・担当者・組
+    App -> User : 出勤台として表示（社員番号＋ハンドルネーム、\nA2 退会済みには「退会済み」を添える）
+  end
+end
+note over User, DB
+  希望・抽選の情報は表示しない（Q-24-2 推奨案）。
+  A3 確定後の修正履歴は扱わない（確定後の修正は【保留】）。
+  E3 閲覧権限なし：D-3 によりログイン済みなら閲覧可。E4 通信エラーは再読み込みを促す。
+end note
+@enduml

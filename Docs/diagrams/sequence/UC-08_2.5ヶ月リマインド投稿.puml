@@ -1,0 +1,40 @@
+@startuml UC-08
+!include ../common/style.iuml
+title UC-08 2.5ヶ月リマインドを指導者用チャンネルへ投稿する
+autonumber
+participant "スケジューラ" as Sched
+participant "APIサーバー" as API
+database "DB" as DB
+participant "Discord Bot" as Bot
+participant "Discord\n指導者用チャンネル" as Ch
+participant "Discord\n管理者" as Admin
+
+Sched -> API : 毎日 9:00 JST に起動（Q-08-1 推奨案）
+API -> API : 今日の日付（JST）
+API -> API : UC-07 期限を算出
+API -> DB : リマインド送信記録を取得
+API -> API : 対象を抽出\n・見習いロールを保有\n・退会済みでない\n・リマインド日 ≦ 今日 ＜ 再スタート日（A2 過ぎた分も前日まで）\n・「人×役職×再スタート日」で未送信
+alt A1 対象なし
+  API -> API : 投稿しない（Q-08-4 推奨案）
+else 対象あり
+  API -> API : グループ分け\n・指導運転士向け：見習い運転士\n・輸送指導向け：信号扱者見習い・指令員見習い\n（A4 対象のいるグループだけ載せる）
+  API -> Bot : 投稿を依頼
+  Bot -> Ch : @指導運転士 @輸送指導（Q-08-2 推奨案）\n表示名・社員番号（Q-08-3 推奨案）・役職・\n最終参加日（未参加ならロール付与日）・再スタート日\n（A5 文字数上限を超えたら分割）
+  alt E2 レート制限・一時エラー
+    Bot -> Ch : 一定回数再試行
+  end
+  alt E1 チャンネルなし / 権限なし / 再試行も失敗
+    Bot --> API : 失敗
+    API -> API : 送信記録を保存しない（次回再送）
+    API -> Bot : 管理者へ失敗通知（D-6）
+    Bot -> Admin : 「リマインド投稿に失敗しました」
+  else 成功
+    Bot --> API : 成功
+    API -> DB : 送信記録を保存（人・役職・再スタート日・送信日時）
+    note right of DB
+      E3 保存に失敗した場合は次回二重投稿になるが許容する。
+      A3 参加が確定して再スタート日が変わったら、新しい日に対して再度送る。
+    end note
+  end
+end
+@enduml

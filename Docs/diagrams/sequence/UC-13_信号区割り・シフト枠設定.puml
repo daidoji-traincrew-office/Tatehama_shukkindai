@@ -1,0 +1,41 @@
+@startuml UC-13
+!include ../common/style.iuml
+title UC-13 信号区割りと信号・指令シフト枠を設定する
+autonumber
+actor "主催者 /\n共同主催者" as Org
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+
+Org -> App : 運転会画面から「信号区割り・シフト枠」を開く
+App -> API : GET 信号エリア・シフト枠
+API -> DB : 取得
+API --> App : エリア・枠（初回は空）+ バージョン
+note right of App : テンプレートからの読み込みは【保留】（A3）
+Org -> App : 信号エリアを作成（名前＋担当駅）\n担当駅はエリア名の自由入力のみ（Q-13-1 推奨案）\n全駅を1エリアにすることも可
+Org -> App : エリアごとにシフト枠を作成\n・担当固定：運転会の開始〜終了で1枠（基本形）\n・交代あり：開始・終了時刻を指定して複数枠
+Org -> App : 指令のシフト枠を作成（同時刻に複数可：Q-13-4 推奨案）
+opt A2 既存の枠を時刻で分割
+  Org -> App : 分割時刻を指定\n（割り当ては前半の枠に残す：Q-13-5 推奨案）
+end
+Org -> App : 保存
+App -> API : PUT 信号エリア・シフト枠（内容 + バージョン）
+API -> API : 権限・未確定チェック
+API -> API : 検証\n・開始 ＜ 終了、運転会の時間内（エラー）\n・同エリア内の重なり・隙間（警告のみ：Q-13-2 推奨案）\n・割り当て済み枠の変更（警告して実行：Q-13-5 推奨案）
+alt E1 権限なし / E4 確定済み
+  API --> App : 403 / 409
+else E2 検証エラー
+  API --> App : 400 + 該当箇所
+else E3 バージョン不一致
+  API --> App : 409 Conflict
+  App -> Org : 警告 → 読み込み直し
+else 成功
+  API -> DB : 保存（バージョン+1）
+  API --> App : 200 + 警告一覧
+  App -> Org : 保存完了・警告を表示
+end
+note over App, DB
+  運転会の日時を変更しても枠は自動で合わせず、警告する（Q-13-6 推奨案）。
+  E5 通信エラー：保存せずエラーを表示する。
+end note
+@enduml

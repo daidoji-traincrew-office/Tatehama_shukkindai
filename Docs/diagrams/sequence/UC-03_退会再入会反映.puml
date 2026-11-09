@@ -1,0 +1,50 @@
+@startuml UC-03
+!include ../common/style.iuml
+title UC-03 Discord退会/再入会を反映する
+autonumber
+participant "Discord" as Discord
+participant "Discord Bot" as Bot
+participant "APIサーバー" as API
+database "DB" as DB
+
+== 退会 ==
+Discord -> Bot : メンバー退会イベント\n（自主退会・キック・BANは区別しない：Q-03-1 推奨案）
+Bot -> API : 退会を通知（DiscordユーザーID）
+API -> DB : ユーザーレコードを検索
+alt A3 レコードなし
+  API --> Bot : 何もしない
+else レコードあり
+  API -> DB : 在籍状態 =「退会済み」、退会日時を記録
+  API -> DB : 保有中ロールを閉じる（削除理由 =「退会」：Q-03-2 推奨案）
+  note right of DB
+    期限管理（UC-08/09）の対象外になる。
+    社員番号・出勤記録・ロール履歴は残す。
+    未確定の出勤台・申請・希望はそのまま残し
+    画面に「退会済み」と表示（Q-03-4 推奨案）。
+  end note
+  API --> Bot : OK
+end
+
+== 再入会 ==
+Discord -> Bot : メンバー参加イベント
+Bot -> API : 参加を通知（DiscordユーザーID）
+API -> DB : ユーザーレコードを検索
+alt A1 レコードなし（初参加）
+  API --> Bot : 何もしない\n（ロール付与時 UC-04 か初回ログイン時に作成）
+else A2 在籍のまま（退会イベントの取りこぼし）
+  API -> API : ログに残す
+else 退会済み
+  API -> DB : 在籍状態 =「在籍」、再入会日時を記録
+  note right of DB
+    社員番号は以前のものを使う（UC-02は起動しない）。
+    以降のロール付与は UC-04 で記録。期限の起点は
+    見習いロールを付け直した日（Q-03-3 推奨案）。
+  end note
+  API --> Bot : OK
+end
+
+note over Bot, API
+  E1 書き込めない場合は再試行し、それでも失敗したら UC-05 の突き合わせで拾い直す。
+  E3 別アカウントでの再入会は別人として扱う（Q-03-5 推奨案）。
+end note
+@enduml

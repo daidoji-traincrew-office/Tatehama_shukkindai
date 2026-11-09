@@ -1,0 +1,36 @@
+@startuml UC-27
+!include ../common/style.iuml
+title UC-27 アルコール検査（アプリ内で完結・演出のみ）
+autonumber
+actor "利用者" as User
+participant "デスクトップアプリ" as App
+participant "サウンド" as Sound
+
+opt A1 酒飲んでますモードを切り替え（アプリを閉じるまで保持：Q-27-4 推奨案）
+  User -> App : モードをオン / オフ
+end
+User -> App : メニューの「アルコール検査」を押す（Q-27-1 推奨案）
+App -> User : 検査中の演出（「息を吹きかけてください…」）
+alt 酒飲んでますモード = オン
+  App -> App : 必ず検知
+else オフ
+  App -> App : 1% の確率で検知（Q-27-2 推奨案）
+end
+alt 検知なし
+  App -> User : 「アルコールは検出されませんでした」
+else 検知あり
+  opt ミュートでない（Q-27-5 推奨案）
+    App -> Sound : 検知音を再生
+    alt E1 音声デバイスなし / 再生失敗
+      Sound --> App : 失敗（エラーは表示しない）
+    end
+  end
+  App -> User : 画面を赤くする
+  App -> App : 数秒待つ（Q-27-3 推奨案）
+end
+App -> User : 元の画面に戻る
+note over User, Sound
+  サーバーには何も送らない。出勤処理には一切影響しない。
+  E2 演出中のエラーは演出を打ち切って元の画面に戻る。
+end note
+@enduml

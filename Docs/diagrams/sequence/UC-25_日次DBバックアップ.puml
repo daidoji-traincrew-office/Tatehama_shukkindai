@@ -1,0 +1,41 @@
+@startuml UC-25
+!include ../common/style.iuml
+title UC-25 日次DBバックアップ
+autonumber
+participant "スケジューラ\n(サーバーマシン)" as Sched
+participant "バックアップ\nスクリプト" as Script
+database "DB" as DB
+participant "Oracle\nObject Storage" as OS
+participant "Discord Bot" as Bot
+participant "Discord\n管理者" as Admin
+
+Sched -> Script : 毎日 4:00 JST に起動（Q-25-1 推奨案）
+Script -> Script : 空き容量を確認
+alt E4 空き容量不足
+  Script -> Bot : 失敗通知（D-6）
+  Bot -> Admin : 「バックアップ失敗：空き容量不足」
+end
+Script -> DB : 稼働中のまま整合性のあるダンプを取得
+alt E1 ダンプ失敗
+  Script -> Bot : 失敗通知（D-6）
+  Bot -> Admin : 「バックアップ失敗：ダンプ取得」
+else
+  Script -> Script : 圧縮（暗号化しない：Q-25-3 推奨案）
+  loop A1 一定回数まで再試行
+    Script -> OS : 日付入りのファイル名でアップロード
+    Script -> OS : サイズ・ハッシュを照合
+  end
+  alt E2 再試行しても失敗
+    Script -> Script : 一時ダンプは残す・保持ルールは適用しない
+    Script -> Bot : 失敗通知（D-6）
+    Bot -> Admin : 「バックアップ失敗：アップロード」
+  else 成功
+    Script -> OS : 保持ルールを適用（Q-25-5 推奨案：スクリプトが削除まで行う）\n・直近30日分は残す\n・30日より古いものは各月の最初の日の分だけ無期限に残す（Q-25-2 推奨案）
+    alt E3 適用中の失敗
+      Script -> Script : ログに残す（次回再適用）
+    end
+    Script -> Script : 一時ダンプファイルを削除
+  end
+end
+Script -> Script : 実行結果をログに残す
+@enduml

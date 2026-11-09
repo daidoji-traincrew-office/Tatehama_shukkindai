@@ -1,0 +1,51 @@
+@startuml UC-11
+!include ../common/style.iuml
+title UC-11 運転会を作成する
+autonumber
+actor "操作者\n(指令員 / 事業本部)" as Op
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+
+Op -> App : 運転会の新規作成を選ぶ
+App -> API : GET 主催者・共同主催者の候補、デフォルトダイヤ一覧
+API -> DB : ログイン済み（社員番号あり）で\n指令員 / 指令員見習いロールを持つ人を検索
+API --> App : 候補者・ダイヤ一覧\n（E3 未ログインの人は候補に出さない）
+Op -> App : 入力
+note right of App
+  ・運転会名（任意。空なら「開催日＋種別」：Q-11-2 推奨案）
+  ・種別 A / B
+  ・開始・終了日時（JST）
+  ・主催者（既定は本人。別の指令員も可：Q-11-1 推奨案）
+  ・共同主催者 0人以上（上限なし：Q-11-4 推奨案）
+  ・コピーするデフォルトダイヤ（1つ以上を選ぶ。0件でも可：Q-11-3 推奨案）
+end note
+Op -> App : 保存
+App -> API : POST 運転会
+API -> API : 権限チェック：指令員 or 事業本部
+API -> API : 検証：種別 / 終了 ＞ 開始 /\n主催者=指令員 / 共同主催者=指令員・指令員見習い / 全員ログイン済み
+alt E1 権限なし
+  API --> App : 403
+else E2 ロール不適合 / E4 日時不正
+  API --> App : 400 + 該当者・該当項目
+  App -> Op : 該当箇所を表示
+else 検証OK
+  group 1トランザクション
+    API -> DB : 運転会を作成（公開設定は既定値：希望人数・希望者とも非公開）
+    API -> DB : 選んだデフォルトダイヤと行路を運転会用にコピー
+    alt E5 コピー失敗
+      API -> DB : ROLLBACK（運転会ごと取り消す）
+      API --> App : 500
+    else
+      API -> DB : COMMIT
+      API --> App : 201 運転会ID
+      App -> Op : 運転会画面を表示（以降 UC-12 / 13 / 14 で準備）
+    end
+  end
+end
+note over App, DB
+  A1 作成後の変更はできる。削除はせず「中止」状態にする。A↔Bの種別変更は確定前のみ（Q-11-5 推奨案）。
+  作成のDiscord告知はしない（Q-11-6 推奨案）。主催者は指令の枠に手で割り当てる（Q-11-7 推奨案）。
+  E6 通信エラー：保存せずエラーを表示する。
+end note
+@enduml

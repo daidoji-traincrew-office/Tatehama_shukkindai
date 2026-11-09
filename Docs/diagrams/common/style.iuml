@@ -1,0 +1,10 @@
+' 共通スタイル（!include ../common/style.iuml で読み込む）
+skinparam defaultFontName "Yu Gothic UI"
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam roundCorner 6
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam noteBackgroundColor #FFFBE6
+skinparam noteBorderColor #C9A227
+skinparam sequenceGroupBodyBackgroundColor #FAFAFA

@@ -1,0 +1,55 @@
+@startuml UC-21
+!include ../common/style.iuml
+title UC-21 出勤台を確定しアーカイブする
+autonumber
+actor "主催者 /\n共同主催者\n（仮）" as Org
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+participant "Discord Bot" as Bot
+participant "Discord\n管理者専用チャンネル" as AdminCh
+
+note over Org, AdminCh #FFE0E0
+  【保留】確定の仕方（誰が・いつ確定するか／確定後の修正 A3／確定し忘れ A4）。
+  この図では「主催者・共同主催者が運転会の終了後に手動で確定する」を仮置きする。
+end note
+Org -> App : 「確定する」
+App -> API : POST 確定前チェック
+API -> DB : 出勤台・申請・最新ロールを取得
+API -> API : 確認\n・未処理の申請（あれば確定不可：Q-21-1 推奨案）\n・担当者のいない列車（警告）\n・指導員のいない見習い（警告）\n・確定時点でロールを失った担当者（警告：Q-17-7）
+API --> App : 警告一覧 / 確定不可の理由
+App -> Org : 一覧を表示して確認を求める
+Org -> App : 「この内容で確定」
+App -> API : POST 確定
+alt E1 既に確定済み
+  API --> App : 409
+else
+  group 1トランザクション
+    API -> DB : 出勤台アーカイブを作る\n（運転会用ダイヤ・行路をコピーごと保存）
+    API -> DB : 出勤記録を作る（1人×1役職×1運転会）\n・行路：1列車以上担当（途中離脱・分割も含む）\n・シフト：1枠以上\n・指導員もアーカイブには載せるが、\n  出勤記録・参加回数には数えない（D-2）
+    alt B運転会
+      API -> DB : 各人・各役職の最終参加日を開催日で更新（UC-07）\n（既存のほうが新しければ変えない）
+    else A1 A運転会
+      API -> API : 最終参加日は更新しない（参加回数のみ集計）
+    end
+    API -> DB : 出勤台を「確定済み」に（以後 UC-15〜20 を拒否）
+  end
+  alt E2 トランザクション中のエラー
+    API -> DB : ROLLBACK（未確定のまま）
+    API --> App : 500
+  else 成功
+    API -> Bot : ダンプ投稿を依頼
+    Bot -> AdminCh : DB全体の圧縮ダンプを投稿（Q-21-3 推奨案）
+    alt E3 投稿失敗（D-6）
+      Bot -> AdminCh : 管理者へ失敗通知（確定は取り消さない）
+    end
+    API --> App : 確定結果 + 警告一覧
+    App -> Org : 確定完了
+  end
+end
+note over Org, AdminCh
+  A2 担当者が1人もいない運転会も確定でき、出勤記録は0件になる。
+  E4 編集中の主催者が確定後に保存すると、確定済みとして API が拒否する。
+  Q-07-5：再スタート後にそれより前のBが確定した場合は再計算し、管理者に通知する。
+end note
+@enduml

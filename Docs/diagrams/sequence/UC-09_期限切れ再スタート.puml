@@ -1,0 +1,59 @@
+@startuml UC-09
+!include ../common/style.iuml
+title UC-09 期限切れで見習いロールを外し再スタート通知する
+autonumber
+participant "スケジューラ" as Sched
+participant "APIサーバー" as API
+database "DB" as DB
+participant "Discord Bot" as Bot
+participant "Discord" as Discord
+participant "Discord\n指導者用チャンネル" as Ch
+actor "見習い本人" as Trainee
+participant "Discord\n管理者" as Admin
+
+Sched -> API : 毎日 9:00 JST に起動（再スタート日当日の朝：D-7）
+API -> API : UC-07 期限を算出
+API -> API : 対象を抽出\n・見習いロールを保有\n・退会済みでない\n・再スタート日 ≦ 今日（A2 停止中に過ぎた分も）\n・ロール矛盾なし
+opt A6 再スタート日より前のB運転会が未確定で本人が載っている
+  API -> API : 確定まで待つ（Q-09-2 推奨案・確定方法は保留のため仮）
+end
+alt A4 対象なし
+  API -> API : 何も投稿しない
+else
+  loop 対象（人×役職）ごと
+    API -> Bot : ロール削除を依頼
+    Bot -> Discord : 本人が今もロールを持つか確認
+    alt E2 すでに持っていない / E3 サーバーにいない
+      Bot --> API : スキップ（UC-05 / UC-03 に任せる）
+    else
+      Bot -> Discord : 期限切れ役職の見習いロールだけを外す\n（他役職・正業ロール・社員番号は触らない）
+      alt E1 外せない（権限・順位・APIエラー）
+        Bot -> Discord : 一定回数再試行
+        Bot --> API : 失敗（記録も通知もしない・次回再処理）
+        API -> Bot : 管理者へ失敗通知（D-6）
+        Bot -> Admin : 「ロール削除に失敗」
+      else 成功
+        Bot --> API : 成功
+        API -> DB : ロール履歴を閉じる（理由=期限切れによる再スタート）\n※UC-04 のイベントと二重にしない
+        API -> DB : 再スタート記録（人・役職・起点・再スタート日・実施日時）
+        opt A5 未確定の出勤台の枠に入っている
+          API -> API : 枠には残し、主催者に警告を出す（Q-09-3 推奨案）
+        end
+      end
+    end
+  end
+  API -> Bot : 通知を依頼（同じ実行回をまとめる）
+  Bot -> Ch : 再スタート通知（運転士分 / 信号・指令分）\n名前・役職・最終参加日・再スタート日
+  alt E5 投稿失敗
+    API -> DB : 未投稿として記録（次回再送）
+  end
+  Bot -> Trainee : DM：見習いロールを外したこと、\n指導員に連絡すれば付け直してもらえること\n（A1 複数役職は1通にまとめる）
+  alt E4 DMを送れない（D-6）
+    Bot -> Ch : 指導者用チャンネルの投稿に\n「本人へのDMが届きませんでした」と添え書き
+  end
+end
+note over API, DB
+  管理者の承認は挟まず自動実行（Q-09-6 推奨案）。
+  A3 見習いロールの付け直しは UC-04 で記録され、UC-07 がその日から3ヶ月を数える。
+end note
+@enduml

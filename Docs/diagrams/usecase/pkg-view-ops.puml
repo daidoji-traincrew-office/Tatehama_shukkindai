@@ -1,0 +1,52 @@
+@startuml pkg-view-ops
+!include ../common/style.iuml
+title ユースケース図：閲覧・運用・おもしろ機能（UC-22〜27）
+left to right direction
+skinparam packageStyle rectangle
+
+actor "本人" as Self
+actor "指導運転士" as InstD
+actor "輸送指導" as InstT
+actor "事業本部\n(管理者)" as Admin
+actor "ログイン利用者\n(全員)" as Member
+actor "スケジューラ\n(毎日 4:00 JST 推奨)" as Sched <<system>>
+actor "Oracle\nObject Storage" as OS <<external>>
+actor "Discord Bot" as Bot <<system>>
+
+rectangle "閲覧" {
+  usecase "UC-22 期限一覧を見る" as UC22
+  usecase "UC-23 個人の出勤履歴を見る" as UC23
+  usecase "UC-24 確定済み出勤台を見る" as UC24
+  usecase "社員番号・ハンドルネームで検索\n(Q-23-4 推奨)" as Search
+}
+rectangle "運用" {
+  usecase "UC-25 日次DBバックアップ\n(30日+月1つを保持)" as UC25
+  usecase "UC-26 復元テスト\n(3ヶ月目安)" as UC26
+}
+rectangle "おもしろ機能（アプリ内のみ）" {
+  usecase "UC-27 アルコール検査" as UC27
+  usecase "酒飲んでますモード" as Drunk
+}
+
+Self --> UC22 : 自分の行のみ\n(Q-22-1 推奨)
+Self --> UC23 : 自分の記録のみ
+InstD --> UC22 : 運転士系
+InstD --> UC23 : 運転士系
+InstT --> UC22 : 信号・指令系
+InstT --> UC23 : 信号・指令系
+Admin --> UC22 : すべて
+Admin --> UC23 : すべて
+Member --> UC24 : 全体を閲覧 (D-3)
+Search .> UC23 : <<extend>>
+UC22 ..> UC23 : 行から遷移
+UC23 ..> UC24 : 運転会へ遷移\n(Q-23-5 推奨)
+
+Sched --> UC25
+UC25 --> OS
+UC25 --> Bot : 失敗時に管理者へ通知 (D-6)
+Admin --> UC26
+UC26 --> OS
+
+Member --> UC27
+Drunk .> UC27 : <<extend>>\n必ず検知
+@enduml

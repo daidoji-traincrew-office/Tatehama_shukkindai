@@ -1,0 +1,36 @@
+@startuml UC-22
+!include ../common/style.iuml
+title UC-22 期限一覧を見る
+autonumber
+actor "利用者\n(指導運転士 / 輸送指導 /\n事業本部 / 本人)" as User
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+
+User -> App : 期限一覧画面を開く
+App -> API : GET 期限一覧（フィルタ：役職・正業を含む・退会済みを含む）
+alt E1 セッション切れ / 最低バージョン未満
+  API --> App : 401 / 426
+  App -> User : UC-01 に従い再ログイン
+end
+API -> API : 閲覧範囲を判定（ロールの和集合）\n・指導運転士：運転士・見習い運転士\n・輸送指導：信号扱者・指令員（各見習い含む）\n・事業本部：すべて\n・本人：自分の行のみ（Q-22-1 推奨案）
+alt E2 閲覧権限なし
+  API --> App : 403
+  App -> User : 「閲覧権限がありません」
+else
+  API -> API : UC-07 期限を算出（範囲内の人×役職）
+  API -> DB : B・A運転会の参加回数（運転会1回につき1回：Q-22-5 推奨案）
+  API --> App : 社員番号・ハンドルネーム・役職・見習い/正業・\n最終参加日・起点・リマインド日・再スタート日・\nB参加回数・A参加回数
+  alt A1 該当者なし
+    App -> User : 「対象者がいません」
+  else
+    App -> User : 一覧を表示（既定は期限が近い順）
+  end
+end
+note over User, DB
+  A2 正業の行：既定は見習いのみ、切り替えで正業も表示。期限の列は空欄（Q-22-2 推奨案）。
+  A3 退会済み：既定は非表示、切り替えで表示（Q-22-3 推奨案）。
+  並べ替えと役職での絞り込みのみ（Q-22-4 推奨案）。行を選ぶと UC-23 に遷移する。
+  E3 通信エラー：エラーを表示し、再読み込みを促す。
+end note
+@enduml
