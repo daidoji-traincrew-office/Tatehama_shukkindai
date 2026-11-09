@@ -59,7 +59,7 @@ cert/                                            0700   Authentication:Certifica
 - `public/` には、署名用の pfx が残っている間の `.cer` だけを置く(現在の鍵、次の鍵、期限後 7 日以内の古い鍵)。pfx を消すと `.cer` も消える。pfx は決して `public/` に置かない。
 - ファイルは原子的に書く(同じディレクトリに `.{guid}.tmp` を書いて flush してから move)。`*.cer` は、完成したものか、存在しないかのどちらかしか見えない。`*.tmp` は読まれず、1 日以上前のものは自動で消える。
 - 起動のたびに、`public/` を署名用の pfx と照合する。`.cer` が無い・内容が違う場合は書き直し、余分な `.cer` は消す。
-- 権限が想定より緩い(既存のディレクトリやファイルも含む。直しはしない)と、状態のログに `CertificatePermissionTooOpen`(7108)の Warning が出る。`public/` に `.cer` と一時ファイル以外(特に pfx)があれば、`UnexpectedPublicFile`(7113)の Warning が出る。
+- 権限が想定より緩い(既存のディレクトリやファイルも含む。直しはしない)と、状態のログに `CertificatePermissionTooOpen`(7108)の Warning が出る。pfx の側(`cert/`、用途のディレクトリ、pfx、ロック)はグループ・その他の権限が 1 つでもあれば、`public/` と `.cer` はグループ・その他に書き込み権限があれば対象になる。**`public/` に書き込める人は、偽の `.cer` を置いて Crew と TTC にトークンを偽造して通せる**ので、`public/` の 7108 は放置しないこと。`public/` に `.cer` と一時ファイル以外(特に pfx)があれば、`UnexpectedPublicFile`(7113)の Warning が出る。
 - `Authentication:CertificateDirectory` が相対パスのときは、起動時に `CertificateDirectoryIsRelative`(7112)の Warning を、解決された絶対パスつきで出す。本番では絶対パスにすること。
 - Docker で bind mount するときは、ホスト側の `cert/` の所有者をコンテナのユーザー(`$APP_UID`、既定 1654)にする。例: `mkdir cert && sudo chown 1654:1654 cert && chmod 700 cert`。
 
@@ -259,12 +259,12 @@ docker run --rm -u 1654 -v "$PWD/idp-cert:/c" -v "$PWD/Server/tools:/t:ro" mcr.m
 署名鍵が漏洩した場合:
 
 1. 出勤台を停止する。
-2. `cert/server-signing/` の pfx を全部消す(漏洩した鍵だけでなく、次の鍵も新しく作り直すほうが安全。次の鍵が漏洩していないと言い切れるなら、それは残してよい)。
+2. `cert/server-signing/` の pfx を**全部**消す(漏洩した鍵だけでなく、次の鍵も)。次の鍵(NotBefore が未来)だけを残すと、今有効な署名鍵が 1 つも無いので起動の事前確認で止まり、すぐ有効な鍵も作られない。
 3. `Authentication__AllowCertificateBootstrap=true` を付けて出勤台を起動する(ディレクトリが空だと、これが無いと起動しない)。**すぐ有効な新しい鍵**が作られ、`cert/public/` の `.cer` が入れ替わる(古い `.cer` は消える)。ログに `CertificateCreated`(7104、初回)と `PublicCertificatesChanged`(7111)が出る。確認したら、この設定を外して再起動する。
 4. Crew と TTC に新しい `.cer` を読み込ませる(再起動)。古い `.cer` を信頼しなくなるので、漏洩した鍵で作られた偽のトークンは通らなくなる。
 5. 利用者は、出勤台クライアントで取り直す(refresh で新しいアクセストークンが出る)。
 
-暗号化鍵が漏洩した場合: `cert/server-encryption/` の pfx を全部消して再起動する。その鍵で暗号化された refresh token は使えなくなり、**全員が再ログイン**になる。refresh token の一括失効は MVP の範囲外(DB の `OpenIddictTokens` を直接消す、など別途検討)。
+暗号化鍵が漏洩した場合: 出勤台を停止し、`cert/server-encryption/` の pfx を全部消して、`Authentication__AllowCertificateBootstrap=true` を付けて起動する(ディレクトリが空だと、これが無いと起動しない)。ログに `CertificateCreated`(7104、初回)が出たら、この設定を外して再起動する。その鍵で暗号化された refresh token は使えなくなり、**全員が再ログイン**になる。refresh token の一括失効は MVP の範囲外(DB の `OpenIddictTokens` を直接消す、など別途検討)。
 
 ### 3. ロールバック(切り替えたら Crew/TTC で 401 が出た)
 

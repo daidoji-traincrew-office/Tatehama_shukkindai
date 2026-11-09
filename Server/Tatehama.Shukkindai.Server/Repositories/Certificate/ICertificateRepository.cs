@@ -47,6 +47,9 @@ public interface ICertificateRepository
     /// <summary><c>public/</c> にある、.cer と一時ファイル(.tmp)以外のファイル名(特に pfx は、あってはならない)。</summary>
     IReadOnlyList<string> FindUnexpectedPublicFiles();
 
-    /// <summary>Unix で、想定より緩い権限のファイルとディレクトリ(グループ・その他に余計な権限がある)。</summary>
+    /// <summary>
+    /// Unix で、想定より緩い権限のファイルとディレクトリ(グループ・その他に余計な権限がある)。
+    /// pfx の側は何も許さない。<c>public/</c> と .cer は読み取りだけを許し、書き込みがあれば緩いとみなす。
+    /// </summary>
     IReadOnlyList<string> FindLoosePermissions();
 }

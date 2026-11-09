@@ -331,6 +331,18 @@ public sealed class CertificateRepository : ICertificateRepository
             Check(Path.Combine(_root, LockFileName), UnixFileMode.None);
         }
 
+        // public/ は Crew と TTC が *.cer を全部信頼する。他人が書き込めると、偽の検証鍵を置いてトークンを偽造できる。
+        // 読み取り(とディレクトリの実行)だけを許す
+        if (Directory.Exists(PublicDirectory))
+        {
+            Check(PublicDirectory, PublicDirectoryMode);
+            foreach (var path in Directory.EnumerateFiles(PublicDirectory)
+                         .Where(p => string.Equals(Path.GetExtension(p), ".cer", StringComparison.OrdinalIgnoreCase)))
+            {
+                Check(path, CerMode);
+            }
+        }
+
         return result;
     }
 

@@ -340,6 +340,30 @@ public sealed class CertificateRepositoryTest : IDisposable
     }
 
     [Fact]
+    public void FindLoosePermissions_PublicWritableByOthers_ReportsPublicDirectoryAndCer()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
+        _repository.SyncPublic([info], NoRetained);
+        // 0755 と 0644(既定の公開)は緩いとみなさない
+        Assert.Empty(_repository.FindLoosePermissions());
+
+        var cerPath = Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer");
+        File.SetUnixFileMode(PublicDirectory, (UnixFileMode)0b111_111_101);
+        File.SetUnixFileMode(cerPath, (UnixFileMode)0b110_110_100);
+
+        var loose = _repository.FindLoosePermissions();
+
+        Assert.Equal(2, loose.Count);
+        Assert.Contains(loose, l => l.StartsWith(PublicDirectory + " "));
+        Assert.Contains(loose, l => l.StartsWith(cerPath));
+    }
+
+    [Fact]
     public async Task SyncPublic_ReplacingExistingCer_NeverLeavesTheFileMissing()
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
