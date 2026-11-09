@@ -21,6 +21,7 @@ internal static partial class CertificateLog
     public const int PublicCertificatesChangedId = 7111;
     public const int CertificateDirectoryIsRelativeId = 7112;
     public const int UnexpectedPublicFileId = 7113;
+    public const int CertificateDirectoryEmptyId = 7114;
 
     /// <summary>用途の表示名(ログの <c>CertificatePurpose</c>)。ディレクトリ名と同じ。</summary>
     public static string Name(CertificatePurpose purpose) => CertificateRotationPolicy.RuleFor(purpose).DirectoryName;
@@ -119,4 +120,8 @@ internal static partial class CertificateLog
     [LoggerMessage(EventId = UnexpectedPublicFileId, EventName = "UnexpectedPublicFile", Level = LogLevel.Warning,
         Message = "Unexpected file {FileName} in the public certificate directory. Only .cer files belong there; a .pfx contains a private key and must be removed.")]
     public static partial void UnexpectedPublicFile(ILogger logger, string fileName);
+
+    [LoggerMessage(EventId = CertificateDirectoryEmptyId, EventName = "CertificateDirectoryEmpty", Level = LogLevel.Error,
+        Message = "No certificates found for {CertificatePurpose} in {Directory} while running, and AllowCertificateBootstrap is false, so none were created. This process keeps running with the keys in memory, but the next restart will fail to start. Restore the pfx files from backup. See Docs/certificate-rotation.md.")]
+    public static partial void CertificateDirectoryEmpty(ILogger logger, string certificatePurpose, string directory);
 }

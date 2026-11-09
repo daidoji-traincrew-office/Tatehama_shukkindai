@@ -355,6 +355,29 @@ public sealed class CertificateServiceTest : IDisposable
     }
 
     [Fact]
+    public void Maintain_DirectoryBecomesEmptyWhileRunning_LogsErrorAndCreatesNothing()
+    {
+        SeedValidSetExceptSigning();
+        Seed(CertificatePurpose.ServerSigning, -10, 700);
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+        service.GetStartupCertificates();
+        Directory.GetFiles(Path.Combine(_directory.Path, "client-encryption"), "*.pfx").ToList().ForEach(File.Delete); // 動作中に消えた
+        _logger.Collector.Clear();
+        _time.Advance(TimeSpan.FromHours(24));
+
+        service.Maintain();
+
+        var record = Assert.Single(Records(CertificateLog.CertificateDirectoryEmptyId));
+        Assert.Equal(LogLevel.Error, record.Level);
+        Assert.Contains("client-encryption", record.Message);
+        Assert.Contains(Path.Combine(Path.GetFullPath(_directory.Path), "client-encryption"), record.Message);
+        Assert.Equal(0, PfxCount("client-encryption"));
+        Assert.Empty(Records(CertificateLog.CertificateCreatedId));
+        // ローテーションの失敗として扱うので、最終成功時刻は進まない
+        Assert.Equal(Start, service.GetStatus().LastRotationSuccess);
+    }
+
+    [Fact]
     public void Maintain_AllSucceed_UpdatesLastRotationSuccess()
     {
         var service = CreateService();

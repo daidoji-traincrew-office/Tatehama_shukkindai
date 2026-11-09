@@ -44,4 +44,13 @@ public class CertificateLogTest
     {
         Assert.Equal(expected, CertificateLog.NextSigningLevel(TimeSpan.FromDays(days)));
     }
+
+    [Fact]
+    public void EventIds_AreFixed()
+    {
+        // アラートが数値で絞り込むため、変えない
+        Assert.Equal(7107, CertificateLog.CertificateRotationFailedId);
+        Assert.Equal(7113, CertificateLog.UnexpectedPublicFileId);
+        Assert.Equal(7114, CertificateLog.CertificateDirectoryEmptyId);
+    }
 }

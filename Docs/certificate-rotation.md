@@ -117,6 +117,7 @@ cert/                                            0700   Authentication:Certifica
 | 7111 `PublicCertificatesChanged` | Information | `public/` に書いた(`+`)・消した(`-`)`.cer` |
 | 7112 `CertificateDirectoryIsRelative` | Warning | `ConfiguredPath`、`ResolvedPath`(本番で相対パス) |
 | 7113 `UnexpectedPublicFile` | Warning | `FileName`(`public/` にある、`.cer` 以外のファイル) |
+| 7114 `CertificateDirectoryEmpty` | Error | `CertificatePurpose`、`Directory`(動作中に、用途のディレクトリから pfx が全部消えた。鍵は作らない。次の再起動で起動に失敗する。ローテーションの失敗として扱い、最終成功時刻は進まない) |
 
 7102 のレベル(何を人に知らせるかで決めている。再起動すれば済む話は、上げすぎない):
 
@@ -207,11 +208,12 @@ absent_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | eve
 ```
 
 ```logql
-# 再起動が必要(7105)、ローテーションの失敗(7107)、起動の停止(7110)が 1 件でもあれば通知
-sum(count_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | event_id =~ "7105|7107|7110" [1h]))
+# 再起動が必要(7105)、ローテーションの失敗(7107)、起動の停止(7110)、ディレクトリが空(7114)が 1 件でもあれば通知
+sum(count_over_time({service="tatehama-shukkindai"} | json event_id="EventId" | event_id =~ "7105|7107|7110|7114" [1h]))
 ```
 
 - ログでは、ログレベルでも絞り込める(7102 は上の表のレベルで出るので、`LogLevel = "Critical"` の 7102 は「次の鍵が無く、期限が近い」)。
+- 動作中に pfx が消えた(7114、Error)ときは、メトリクスの `last_success_timestamp` が進まなくなる(C1 は 3 日後、C2 は 7 日後)ので、気づくのが遅い。早く知りたければ、上の LogQL の 7114 で通知する(Grafana のアラートはメトリクスだけでは拾えない)。
 - 評価間隔は 1 時間、範囲は 26 時間(1 日 1 回のログを取りこぼさない)。
 
 ## 手順書(Runbook)
@@ -294,6 +296,14 @@ docker run --rm -u 1654 -v "$PWD/idp-cert:/c" -v "$PWD/Server/tools:/t:ro" mcr.m
 1. 例外メッセージのパスのファイルを、別の場所へ移す(`.pfx` 以外の拡張子にしてもよい。調査後に消す)。
 2. 出勤台を再起動する。残りの有効な鍵で起動し、足りない用途は自動で作られる。
 3. 署名の pfx が 1 つも残らなかった場合は、「全部期限切れで起動しないとき」と同じ扱い(`AllowCertificateBootstrap=true` で新しい鍵を作る。Crew/TTC は読み込み直しが必要)。
+
+### 5b. 動作中に pfx が消えた(7114)
+
+症状: 7114 `CertificateDirectoryEmpty`(Error)。動いているプロセスはメモリ上の鍵で動き続けるが、**このままだと次の再起動で起動に失敗する**。
+
+1. **再起動しない**。バックアップから `cert/` の該当の用途のディレクトリを戻す(所有者 UID 1654、pfx 0600、ディレクトリ 0700 を保つ)。次の 24 時間ごとの実行で 7114 が止まる。
+2. 署名の pfx が消えたときは、`public/` の `.cer` も消えている可能性がある(`PublicCertificatesChanged` の `-` を確認)。戻したあと、次の実行(または再起動)で `.cer` が書き直される。
+3. バックアップが無いときは、「6. 全部期限切れで起動しないとき」と同じ扱い(`AllowCertificateBootstrap=true` で作り直し。署名なら Crew/TTC の読み込み直しが必要)。
 
 ### 6. 全部期限切れで起動しないとき
 
@@ -378,7 +388,7 @@ flowchart LR
     RA --> RO["Rotate(用途ごと)<br/>Policy.Plan → Create / Delete"]
     RA --> SP[SyncPublic]
     M --> BS["BuildStatus<br/>(ディスクの現状)"]
-    BS --> LS["LogStatus<br/>7101〜7113"]
+    BS --> LS["LogStatus<br/>7101〜7114"]
     BS -.読む.-> ME["CertificateMetrics<br/>(ObservableGauge)"]
 ```
 
@@ -417,7 +427,7 @@ flowchart LR
 | `Services/Certificate/CertificateService.cs` | 呼ぶ順番、起動時に止めるかの判断、状態の保持、ログ | 状態をメモリに持つ。ディスクは Repository 経由 |
 | `Services/Certificate/CertificateRotationPolicy.cs` | 作る・消す・使う鍵の判断(閾値は `RuleFor`) | なし(純粋関数) |
 | `Repositories/Certificate/CertificateRepository.cs` | pfx と `.cer` の読み書き、権限、ロック | ディスク |
-| `Services/Certificate/CertificateLog.cs` | ログ(EventId 7101〜7113) | ログ出力 |
+| `Services/Certificate/CertificateLog.cs` | ログ(EventId 7101〜7114) | ログ出力 |
 | `Services/Certificate/CertificateMetrics.cs` | メトリクス | なし(読み取り時に計算) |
 | `Models/CertificateInfo.cs`、`CertificateStatus.cs` | 証明書のメタデータと状態の型 | なし |
 

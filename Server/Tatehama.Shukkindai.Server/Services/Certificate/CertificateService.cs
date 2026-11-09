@@ -256,6 +256,7 @@ public sealed class CertificateService(
             {
                 Exception? failure = null;
                 var publicFailed = false;
+                var directoryEmpty = false;
 
                 // --- 1. 用途ごとに、作る・消すを実行する ---
                 // 1 つの用途が失敗しても、他の用途は続ける(失敗は最初の 1 件を覚えて、呼び出し元の判断に渡す)。
@@ -263,7 +264,8 @@ public sealed class CertificateService(
                 {
                     try
                     {
-                        Rotate(purpose, now);
+                        // 空のディレクトリ(動作中に pfx が消えた)はローテーションの失敗として扱う
+                        directoryEmpty |= !Rotate(purpose, now);
                     }
                     catch (Exception e) when (e is not OperationCanceledException)
                     {
@@ -286,7 +288,7 @@ public sealed class CertificateService(
                     publicFailed = true;
                 }
 
-                return new RotationOutcome(failure is null, failure, publicFailed);
+                return new RotationOutcome(failure is null && !directoryEmpty, failure, publicFailed);
             });
         }
         catch (Exception e) when (e is not OperationCanceledException)
@@ -297,7 +299,8 @@ public sealed class CertificateService(
         }
     }
 
-    private void Rotate(CertificatePurpose purpose, DateTimeOffset now)
+    /// <summary>1 つの用途のローテーションを行う。ディレクトリが空で生成も許可されていない(作れなかった)ときは false。</summary>
+    private bool Rotate(CertificatePurpose purpose, DateTimeOffset now)
     {
         var name = CertificateLog.Name(purpose);
 
@@ -308,7 +311,16 @@ public sealed class CertificateService(
         var plan = CertificateRotationPolicy.Plan(purpose, certificates, inUse, now,
             _processStart == default ? now : _processStart, settings.Value.AllowCertificateBootstrap);
 
-        // --- 2. 作る(生成が先。消した結果、期限内の鍵が無くならないようにするため) ---
+        // --- 2. 空のディレクトリを知らせる(動作中に pfx が消えた。鍵は作らない) ---
+        // 起動時は PreflightChecks が先に止めるので、ここに来るのは動作中だけ。次の再起動で起動に失敗するため Error。
+        if (plan.BootstrapDenied)
+        {
+            CertificateLog.CertificateDirectoryEmpty(logger, name,
+                Path.Combine(Path.GetFullPath(settings.Value.CertificateDirectory), name));
+            return false;
+        }
+
+        // --- 3. 作る(生成が先。消した結果、期限内の鍵が無くならないようにするため) ---
         if (plan.Create is { } create)
         {
             var created = repository.Create(purpose, create.NotBefore, create.NotAfter);
@@ -321,12 +333,14 @@ public sealed class CertificateService(
                 CertificateLog.Iso(created.NotBefore), CertificateLog.Iso(created.NotAfter));
         }
 
-        // --- 3. 消す(保持期間を過ぎたものだけ。Plan が決めた分) ---
+        // --- 4. 消す(保持期間を過ぎたものだけ。Plan が決めた分) ---
         foreach (var expired in plan.Delete)
         {
             repository.Delete(expired);
             CertificateLog.CertificateDeleted(logger, name, expired.Thumbprint, CertificateLog.Iso(expired.NotAfter));
         }
+
+        return true;
     }
 
     /// <summary>Crew と TTC が読む <c>public/</c> の .cer を、署名用の pfx と一致させる。pfx を消したら .cer も消える。</summary>
