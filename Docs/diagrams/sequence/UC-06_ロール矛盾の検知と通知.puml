@@ -1,0 +1,34 @@
+@startuml UC-06
+!include ../common/style.iuml
+title UC-06 ロールの矛盾を検知し管理者に通知する
+autonumber
+participant "APIサーバー\n(UC-04 / UC-05 から)" as API
+database "DB" as DB
+participant "Discord Bot" as Bot
+participant "Discord\n管理者用チャンネル" as AdminCh
+
+API -> DB : 対象メンバーの現在のロールを取得
+API -> API : 判定ルールを適用\n同じ役職の見習い＋正業を両方持つ → 矛盾\n（Q-06-1 推奨案、ルールは追加しやすい作り）
+alt A1 矛盾なし
+  opt 未解消の矛盾記録がある
+    API -> DB : 解消日時を記録して閉じる（解消通知はしない）
+  end
+else 矛盾あり
+  API -> DB : 同じ未解消の矛盾があるか
+  alt A2 通知済み・未解消
+    API -> API : 再通知しない（Q-06-3 推奨案）
+  else 新しい矛盾
+    API -> DB : 矛盾記録を作成
+    API -> Bot : 管理者へ通知を依頼
+    Bot -> AdminCh : 対象者（表示名・社員番号）、\nロールの組み合わせ、検知日時\n（通知先は Q-06-2 推奨案）
+    alt E1 送信失敗
+      Bot --> API : 失敗
+      API -> DB : 「通知失敗」を記録（次の判定で送り直す）
+    end
+  end
+end
+note over API, DB
+  E2 矛盾が解消するまで、その人のリマインド・再スタートは止める（Q-06-4 推奨案）。
+  自動では直さず通知だけする（Q-06-5 推奨案）。
+end note
+@enduml

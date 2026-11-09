@@ -80,3 +80,8 @@
 - **Q-25-5 保持ルールの実装方法**
   - 選択肢：(a) オブジェクトストレージのライフサイクルポリシーで管理（月次分は別の場所にコピー）／(b) バックアップスクリプトが削除まで行う
   - 推奨：(b)。「30日＋月1つ」はライフサイクルポリシーだけでは表しにくく、スクリプトで扱う方が分かりやすい。
+
+## 図
+- シーケンス図：[UC-25_日次DBバックアップ.puml](../diagrams/sequence/UC-25_日次DBバックアップ.puml)
+- ユースケース図：[pkg-view-ops.puml](../diagrams/usecase/pkg-view-ops.puml)（全体図：[overview.puml](../diagrams/usecase/overview.puml)）
+- 想定UI：[16_Bot通知文面.puml](../diagrams/ui/16_Bot通知文面.puml)

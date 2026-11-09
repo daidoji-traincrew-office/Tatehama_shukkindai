@@ -1,0 +1,55 @@
+@startuml pkg-role-deadline
+!include ../common/style.iuml
+title ユースケース図：ロール記録・見習い期限（UC-04〜09）
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Discord" as Discord <<external>>
+actor "Discord Bot" as Bot <<system>>
+actor "スケジューラ\n(毎朝 9:00 JST 推奨)" as Sched <<system>>
+actor "指導運転士" as InstD
+actor "輸送指導" as InstT
+actor "見習い本人" as Trainee
+actor "事業本部\n(管理者)" as Admin
+
+rectangle "ロール記録・見習い期限" {
+  usecase "UC-04 ロール変化を\nリアルタイム記録" as UC04
+  usecase "UC-05 起動時(+1日1回)に\n全メンバーと突き合わせ" as UC05
+  usecase "UC-06 ロール矛盾を\n検知・通知" as UC06
+  usecase "UC-07 最終参加日・\n期限日を算出" as UC07
+  usecase "UC-08 2.5ヶ月リマインド\n(再スタート15日前)" as UC08
+  usecase "UC-09 期限切れで\n見習いロールを外す" as UC09
+  usecase "UC-03 退会/再入会を反映" as UC03
+  usecase "処理失敗を管理者に通知\n(D-6)" as FailNotify
+}
+
+Discord --> Bot : ロール変更イベント
+Bot --> UC04
+Bot --> UC05
+UC04 ..> UC06 : <<include>>
+UC05 ..> UC06 : <<include>>
+UC05 ..> UC03 : <<include>>
+UC06 --> Admin : 管理者用チャンネル
+
+Sched --> UC08
+Sched --> UC09
+UC08 ..> UC07 : <<include>>
+UC09 ..> UC07 : <<include>>
+UC08 --> InstD : 見習い運転士分
+UC08 --> InstT : 信号・指令の見習い分
+UC09 --> InstD : 指導者用チャンネル
+UC09 --> InstT : 指導者用チャンネル
+UC09 --> Trainee : DM
+FailNotify .> UC08 : <<extend>>
+FailNotify .> UC09 : <<extend>>
+FailNotify --> Admin
+UC09 ..> UC04 : ロール削除を記録\n(理由=自動再スタート)
+
+note bottom of UC07
+  起点＝その役職の最終参加日（B運転会の確定済み出勤台のみ）。
+  未参加なら見習いロール付与日（導入時はBotが初めて確認した日：D-4）。
+  指導員として入った回は数えない（D-2）。
+  再スタート日＝起点の暦3ヶ月後（存在しない日は翌月繰越：D-8）。
+  矛盾がある人は算出しない（Q-07-4 推奨案）。
+end note
+@enduml

@@ -1,0 +1,28 @@
+@startuml UC-26
+!include ../common/style.iuml
+title UC-26 復元テスト（3ヶ月を目安に手動で実施）
+autonumber
+actor "事業本部\n(管理者)" as Admin
+participant "Oracle\nObject Storage" as OS
+participant "管理者PC上の\nコンテナ（復元先）" as Env
+participant "運用記録ファイル\n(リポジトリ内)" as Log
+
+note over Admin : リマインドは送らない（D-6）。\n間隔は3ヶ月を目安（Q-26-1）。
+Admin -> OS : 最新のダンプを取得
+alt E1 取得失敗
+  Admin -> Admin : Object Storage の状態と UC-25 の実行ログを確認\n（日次バックアップが止まっていれば最優先で直す）
+else
+  OS --> Admin : ダンプ
+  Admin -> Env : 空のDBを用意してダンプを戻す（Q-26-2 推奨案）
+  opt A1 古いダンプも確認する
+    Admin -> OS : 月ごとに残したダンプを取得して同様に戻す
+  end
+  Admin -> Env : 確認（Q-26-3 推奨案）\n・復元がエラーなく終わる\n・主要テーブルの件数が本番とおおむね一致\n・最新の確定済み出勤台が読める
+  alt E2 復元失敗 / E3 確認項目の不一致
+    Admin -> Admin : 原因を調べる（ダンプ破損・DBバージョン違い・手順の誤り）\n原因がバックアップ側なら UC-25 を修正して再テスト
+  end
+  Admin -> Log : 実施日・使ったダンプ・結果を記録（Q-26-4 推奨案）
+  Admin -> Env : 片付ける
+end
+note over Admin, Log : Discordへの補助ダンプは復元テストの対象にしない（Q-26-5 推奨案）。
+@enduml

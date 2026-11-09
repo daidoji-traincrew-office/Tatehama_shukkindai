@@ -1,0 +1,47 @@
+@startuml UC-04
+!include ../common/style.iuml
+title UC-04 ロールの付与・削除をリアルタイムで記録する
+autonumber
+actor "ロールを変更する人\n(事業本部など)" as Changer
+participant "Discord" as Discord
+participant "Discord Bot" as Bot
+participant "APIサーバー" as API
+database "DB" as DB
+
+Changer -> Discord : ロールを付与 / 削除
+Discord -> Bot : メンバー更新イベント（更新前・更新後のロール）
+Bot -> Bot : 差分を求める（付与 / 削除）
+Bot -> Bot : 記録対象の9ロール以外は無視\n（Q-04-1 推奨案、ロールIDとの対応は設定）
+Bot -> API : ロール変化を送信（Q-04-2 推奨案：API経由）
+API -> DB : DiscordユーザーIDでユーザーを検索
+opt ユーザーなし
+  API -> DB : ユーザーを作成（社員番号は空欄：I-5）
+end
+loop 付与されたロールごと
+  alt A1 すでに保有中として記録済み
+    API -> API : 二重に記録しない
+  else
+    API -> DB : ロール保有履歴に「保有開始」\n（ロール種別・付与日時・検知方法=リアルタイム）
+    opt A3 見習いロール
+      note right of DB : 付与日（JST）を期限の起点候補にする（UC-07）
+    end
+  end
+end
+loop 削除されたロールごと
+  alt A2 保有中の記録なし
+    API -> API : ログに残す
+  else
+    API -> DB : 保有中の記録を閉じる\n（削除日時・削除理由：手動／自動再スタート(A4)／退会）\n※Q-04-3 推奨案
+  end
+end
+API -> API : UC-06 矛盾の判定を呼ぶ
+note right of DB
+  ロール保有履歴は期限の起点などの記録に使う。
+  権限判定には使わない（Discord上の現在のロールで判定：D-12）
+end note
+API --> Bot : OK
+
+alt E1 記録先に書き込めない
+  Bot -> Bot : 一定回数再試行 → 失敗ならイベントを捨ててログに残す\n（UC-05 の突き合わせで拾い直す）
+end
+@enduml

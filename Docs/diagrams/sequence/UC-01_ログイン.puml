@@ -1,0 +1,84 @@
+@startuml UC-01
+!include ../common/style.iuml
+title UC-01 デスクトップアプリへログインする
+autonumber
+actor "利用者" as User
+participant "デスクトップアプリ" as App
+participant "GitHub Releases" as GH
+participant "Discord\n(OAuth)" as Discord
+participant "出勤台サーバー\n(IdP / 出勤台API)" as Srv
+participant "Discord Bot\n(ギルドキャッシュ)" as Bot
+database "DB" as DB
+participant "他のアプリ\n(ATSなど)" as Other
+
+User -> App : アプリを起動
+App -> GH : 最新版を確認
+alt E1 GitHubに接続できない
+  GH --> App : エラー
+  note right of App : 確認を飛ばして続行\n（古すぎる版は手順10で弾く）
+else 最新版あり（A1）
+  GH --> App : 新しい版の情報
+  App -> User : 更新を案内（ダウンロードページへ誘導）\n※Q-01-2 推奨案（未確定）
+else 最新版
+  GH --> App : 現在の版が最新
+end
+
+alt A2 有効なトークンが保存済み（D-10）
+  opt アクセストークンの期限切れ
+    App -> Srv : refresh token で更新
+    Srv -> Bot : Discordサーバーのメンバーか確認
+    alt E4 メンバーでなくなっていた
+      Srv --> App : 更新を拒否
+      App -> User : 再ログインを求める
+    end
+    Srv --> App : 新しいアクセストークン\n（refresh token の期限 7日を延長）
+  end
+else 通常
+  App -> Srv : 認可画面をブラウザで開く（PKCE S256）
+  Srv -> Discord : Discord OAuth の認可画面へ送る（出勤台サーバーが仲介）
+  User -> Discord : 認可する
+  alt E2 拒否 / 画面を閉じた
+    Discord --> Srv : 拒否
+    Srv --> App : 拒否
+    App -> User : ログイン画面に戻す
+  end
+  Discord --> Srv : 認可コード
+  Srv -> Discord : DiscordユーザーIDを取得
+  Srv -> Bot : メンバーか確認し、Discordのユーザー名を取得（Q-01-1）
+  alt E5 Botの準備ができていない（Discordと同期し直している最中）
+    Srv --> App : temporarily_unavailable
+    App -> User : しばらくしてからの再試行を案内\n（メンバーでない、とは区別する）
+  else E4 Discordサーバーのメンバーでない（未参加・退会済み：D-9）
+    Srv --> App : ログイン拒否
+    App -> User : メンバーでないためログインできない旨を表示
+  end
+  Srv -> DB : DiscordユーザーIDで利用者を特定
+  opt 社員番号が未発番
+    Srv -> Srv : UC-02 社員番号を自動発番
+  end
+  opt A3 表示名が変わっている（Q-01-5 推奨案：サーバー内ニックネーム優先）
+    Srv -> DB : 表示名を更新
+  end
+  Srv -> Bot : 現在のDiscordロールを取得（D-12。ロールはトークンに含めない）
+  Srv --> App : トークンを発行\n・アクセストークン 1時間（sub = DiscordユーザーID、name = Discordのユーザー名）\n・refresh token 7日（使うたびに延長）
+end
+
+App -> Srv : 出勤台APIを呼ぶ（アクセストークン + アプリのバージョン）
+Srv -> DB : 最低対応バージョンを取得
+alt E3 最低対応バージョン未満（D-11：呼び出しのたびに判定）
+  Srv --> App : 426 更新が必要
+  App -> User : 更新が必要な旨と配布先を表示
+else
+  Srv --> App : 社員番号・表示名・ロールに応じた機能
+  App -> User : ホーム画面を表示
+end
+
+opt 他のアプリがトークンを必要とするとき
+  App -> Other : アクセストークンだけを DPAPI で暗号化したファイルに書き出す\n（形式は Docs/authentication.md。refresh token は渡さない）
+end
+
+note over App, Srv
+  E5：手順4〜10で出勤台サーバーに接続できない場合はエラー表示し、再試行できるようにする。
+  以降の各操作の権限・閲覧範囲は出勤台API側で判定する（アプリの表示制御は補助）。
+end note
+@enduml

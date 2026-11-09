@@ -1,0 +1,54 @@
+@startuml pkg-meeting-setup
+!include ../common/style.iuml
+title ユースケース図：運転会の準備（UC-10〜14）
+left to right direction
+skinparam packageStyle rectangle
+
+actor "事業本部\n(管理者)" as Admin
+actor "指令員" as Disp
+actor "主催者" as Org
+actor "共同主催者\n(指令員/指令員見習い)" as CoOrg
+Org -|> Disp
+CoOrg -- Org : 同等の権限 >
+
+rectangle "運転会の準備" {
+  usecase "UC-10 デフォルトの\nダイヤ・行路を編集" as UC10
+  usecase "ダイヤを複製\n(Q-10-4 推奨)" as Dup
+  usecase "UC-11 運転会を作成" as UC11
+  usecase "デフォルトダイヤ・行路を\n運転会用にコピー" as Copy
+  usecase "UC-12 運転会用\nダイヤ・行路を編集" as UC12
+  usecase "デフォルトを追加取り込み\n(Q-12-3 推奨)" as AddCopy
+  usecase "UC-13 信号区割り・\nシフト枠を設定" as UC13
+  usecase "シフト枠を時刻で分割" as Split
+  usecase "UC-14 公開設定を変更" as UC14
+  usecase "保存時バージョン照合\n(楽観ロック)" as Ver
+}
+
+Admin --> UC10
+Admin --> UC11 : Q-11-1 推奨
+Disp --> UC11
+Org --> UC12
+Org --> UC13
+Org --> UC14
+CoOrg --> UC12
+CoOrg --> UC13
+CoOrg --> UC14
+
+Dup .> UC10 : <<extend>>
+UC11 ..> Copy : <<include>>
+AddCopy .> UC12 : <<extend>>
+Split .> UC13 : <<extend>>
+UC10 ..> Ver : <<include>>
+UC12 ..> Ver : <<include>>
+UC13 ..> Ver : <<include>>
+
+note bottom of UC10
+  D-1：デフォルトの編集は事業本部のみ。
+  主催者・共同主催者は運転会ごとのコピーだけを編集する。
+end note
+note bottom of UC14
+  希望人数・希望者：既定は非公開。
+  当選者の行路：必ず公開（変更不可）。
+  「人数は非公開・希望者は公開」は不可（Q-14-4 推奨）。
+end note
+@enduml

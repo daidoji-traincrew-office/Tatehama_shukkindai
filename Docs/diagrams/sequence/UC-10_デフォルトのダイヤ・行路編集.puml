@@ -1,0 +1,50 @@
+@startuml UC-10
+!include ../common/style.iuml
+title UC-10 デフォルトのダイヤ・行路を編集する
+autonumber
+actor "事業本部" as Admin
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+
+Admin -> App : デフォルトのダイヤ・行路編集画面を開く
+App -> API : GET デフォルトダイヤ一覧
+API -> DB : 取得
+API --> App : ダイヤ一覧（名前）+ バージョン
+note right of App
+  閲覧はログインした全員（Q-10-5 推奨案）。
+  事業本部以外は閲覧のみ表示。
+end note
+Admin -> App : ダイヤを選ぶ / 新規作成（名前入力）
+opt A2 ダイヤを複製（Q-10-4 推奨案）
+  Admin -> App : 複製元を選び新しい名前を入力
+end
+Admin -> App : 列車（列車番号のみ：Q-10-1 推奨案）を追加・変更・削除
+Admin -> App : 行路（行路番号＋名前：Q-10-2 推奨案）と\n担当列車番号の順序付きリストを編集
+Admin -> App : 保存
+App -> API : PUT デフォルトダイヤ（内容 + 手元のバージョン）
+API -> API : 権限チェック：事業本部ロール（D-1）
+alt E1 権限なし
+  API --> App : 403
+  App -> Admin : 編集できません
+else E2 検証エラー（Q-10-3 推奨案）
+  note right of API
+    ・ダイヤ名の重複
+    ・行路の列車番号がダイヤ内に存在しない
+  end note
+  API --> App : 400 + 該当箇所
+  App -> Admin : 該当箇所を示して修正を促す
+else E3 バージョン不一致（Q-10-6 推奨案）
+  API --> App : 409 Conflict
+  App -> Admin : 「他の人が更新しました」→ 読み込み直し
+else 成功
+  API -> DB : 保存（バージョン+1）
+  API --> App : 200 + 新バージョン + 警告\n（同じ列車が複数の行路に入っている等）
+  App -> Admin : 保存完了（警告があれば表示）
+end
+note over App, DB
+  A1 ダイヤ削除：属する行路も削除。作成済み運転会のコピーとアーカイブは影響を受けない。
+  A3 名前変更：運転会側のコピーの名前は変わらない。
+  E4 通信エラー：保存せずエラー表示、入力内容はアプリに残す。
+end note
+@enduml

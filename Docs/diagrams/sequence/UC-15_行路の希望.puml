@@ -1,0 +1,39 @@
+@startuml UC-15
+!include ../common/style.iuml
+title UC-15 行路の希望を表明する
+autonumber
+actor "運転士 /\n見習い運転士" as Driver
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+
+Driver -> App : 運転会を選び行路一覧を開く
+App -> API : GET 行路一覧（希望状況つき）
+API -> DB : 運転会用行路・行路希望・公開設定・割り当てを取得
+API -> API : 公開設定を適用\n・希望人数：公開時のみ\n・誰が希望したか：公開時のみ\n・担当者（抽選・割り当て結果）：常に公開\n・自分の希望：常に
+API --> App : 行路一覧
+App -> Driver : 行路識別子・列車番号リスト・自分の希望・\n（公開なら）人数と希望者・担当者を表示
+alt 希望する
+  Driver -> App : 行路を選び「希望する」
+  App -> API : POST 行路希望
+  API -> API : 検証\n・運転士 / 見習い運転士ロール（E1）\n・受付期間内（E2：運転会の作成から。締切は【保留】）\n・1人1行路（D-5：既存の希望があれば差し替えを確認）\n・同じ行路に有効な希望あり（E5：何もしない）\n・担当決定済みの行路（E4：【保留】）
+  alt E1 / E2 / E3 エラー
+    API --> App : 400 / 403
+    App -> Driver : 「受付期間外です」など
+  else
+    API -> DB : 行路希望を「有効」で保存（希望日時）
+    API --> App : 200
+  end
+else A1 取り消す
+  Driver -> App : 希望済みの行路で「取り消す」
+  App -> API : DELETE 行路希望
+  API -> DB : 状態を「取消」に変更（削除しない）
+  API --> App : 200
+end
+App -> Driver : 一覧を更新して表示
+note over Driver, DB
+  A2 取り消した行路に再度希望すると、新しい希望日時で「有効」を登録する。
+  A3 見習い運転士も同じ操作で希望できる。指導員は UC-17 で主催者が付ける。
+  指導運転士は指導員として希望できない（Q-15-2 推奨案）。
+end note
+@enduml

@@ -1,0 +1,136 @@
+@startuml overview
+!include ../common/style.iuml
+title 運転会 勤怠管理システム 全体ユースケース図
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+
+' ===== アクター（Discordロール）=====
+actor "メンバー\n(ログイン利用者)" as Member
+actor "運転士 /\n見習い運転士" as Driver
+actor "信号扱者 / 指令員\n(各見習い含む)" as SigDisp
+actor "指導運転士" as InstD
+actor "輸送指導" as InstT
+actor "事業本部\n(管理者)" as Admin
+' ===== アクター（運転会ごとの役割）=====
+actor "主催者 /\n共同主催者" as Org
+
+Driver -|> Member
+SigDisp -|> Member
+InstD -|> Member
+InstT -|> Member
+Admin -|> Member
+Org -|> Member
+
+' ===== 外部・システムアクター =====
+actor "Discord Bot" as Bot <<system>>
+actor "スケジューラ" as Sched <<system>>
+actor "Discord" as Discord <<external>>
+actor "GitHub Releases" as GH <<external>>
+actor "Oracle\nObject Storage" as OS <<external>>
+
+rectangle "運転会 勤怠管理システム" {
+  package "認証・社員" {
+    usecase "UC-01\nログインする" as UC01
+    usecase "UC-02\n社員番号を自動発番する" as UC02
+    usecase "UC-03\n退会/再入会を反映する" as UC03
+  }
+  package "ロール記録・見習い期限" {
+    usecase "UC-04\nロール変化を\nリアルタイム記録" as UC04
+    usecase "UC-05\n起動時に\nロールを突き合わせ" as UC05
+    usecase "UC-06\nロール矛盾を\n検知・通知" as UC06
+    usecase "UC-07\n最終参加日・\n期限日を算出" as UC07
+    usecase "UC-08\n2.5ヶ月リマインド" as UC08
+    usecase "UC-09\n期限切れ再スタート" as UC09
+  }
+  package "運転会の準備" {
+    usecase "UC-10\nデフォルトの\nダイヤ・行路編集" as UC10
+    usecase "UC-11\n運転会を作成する" as UC11
+    usecase "UC-12\n運転会用\nダイヤ・行路編集" as UC12
+    usecase "UC-13\n信号区割り・\nシフト枠設定" as UC13
+    usecase "UC-14\n公開設定を変更する" as UC14
+  }
+  package "出勤台" {
+    usecase "UC-15\n行路を希望する" as UC15
+    usecase "UC-16\n人気行路を抽選する" as UC16
+    usecase "UC-17\n枠に人を割り当てる" as UC17
+    usecase "UC-18\n途中離脱・途中参加\nを申請する" as UC18
+    usecase "UC-19\n申請を承認・却下する" as UC19
+    usecase "UC-20\n出勤台を直接書き換える" as UC20
+    usecase "UC-21\n出勤台を確定・\nアーカイブする" as UC21
+  }
+  package "閲覧" {
+    usecase "UC-22\n期限一覧を見る" as UC22
+    usecase "UC-23\n個人の出勤履歴を見る" as UC23
+    usecase "UC-24\n確定済み出勤台を見る" as UC24
+  }
+  package "運用" {
+    usecase "UC-25\n日次DBバックアップ" as UC25
+    usecase "UC-26\n復元テスト" as UC26
+  }
+  package "おもしろ機能" {
+    usecase "UC-27\nアルコール検査" as UC27
+  }
+}
+
+' ===== 主アクターとの関連 =====
+Member --> UC01
+Member --> UC23
+Member --> UC24
+Member --> UC27
+Member --> UC18
+Driver --> UC15
+InstD --> UC22
+InstT --> UC22
+Admin --> UC10
+Admin --> UC22
+Admin --> UC26
+Org --> UC11
+Org --> UC12
+Org --> UC13
+Org --> UC14
+Org --> UC16
+Org --> UC17
+Org --> UC19
+Org --> UC20
+Org --> UC21
+
+Bot --> UC03
+Bot --> UC04
+Bot --> UC05
+Bot --> UC06
+Sched --> UC08
+Sched --> UC09
+Sched --> UC25
+
+' ===== 外部 =====
+UC01 --> Discord
+UC01 --> GH
+UC03 <-- Discord
+UC04 <-- Discord
+UC25 --> OS
+UC26 --> OS
+
+' ===== include / extend =====
+UC01 ..> UC02 : <<include>>\n初回のみ
+UC04 ..> UC06 : <<include>>
+UC05 ..> UC06 : <<include>>
+UC05 ..> UC03 : <<include>>\n見逃した退会/再入会
+UC08 ..> UC07 : <<include>>
+UC09 ..> UC07 : <<include>>
+UC22 ..> UC07 : <<include>>
+UC21 ..> UC07 : <<include>>\nB運転会のみ
+UC11 ..> UC10 : デフォルトを\nコピー
+UC19 ..> UC20 : <<include>>\n承認時に書き換え
+UC16 ..> UC17 : 当選者を登録
+UC18 ..> UC19 : 申請→処理
+
+note bottom of UC21
+  確定の仕方（誰が・いつ・確定後の修正・確定し忘れ）は【保留】。
+  図では「主催者/共同主催者が手動で確定」を仮置き。
+end note
+note bottom of UC16
+  抽選タイミング（手動 / 締切時刻で自動）は【保留】。
+  図では主催者が手動で実行する形を仮置き。
+end note
+@enduml

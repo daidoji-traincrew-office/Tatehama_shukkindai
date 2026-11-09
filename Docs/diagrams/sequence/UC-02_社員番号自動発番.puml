@@ -1,0 +1,35 @@
+@startuml UC-02
+!include ../common/style.iuml
+title UC-02 社員番号を自動発番する（UC-01 手順9から呼ばれる）
+autonumber
+participant "APIサーバー\n(UC-01 ログイン処理)" as API
+database "DB" as DB
+
+API -> API : 初回ログイン日時から年・月を求める\n（日本時間：Q-02-2 推奨案）
+API -> API : 先頭5桁 = 西暦下3桁 + 月2桁\n例：2026年11月 → 02611\n（Q-02-1 推奨案）
+group 排他的に採番・保存（社員番号に一意制約）
+  API -> DB : BEGIN / その年月の連番を取得してロック
+  DB --> API : 現在の連番 n
+  alt E2 n + 1 > 999
+    API --> API : 発番エラー → ログイン失敗\n管理者が対処（Q-02-4 推奨案）
+  end
+  API -> API : 社員番号 = 先頭5桁 + (n+1) を3桁ゼロ埋め\n例：02611001
+  API -> DB : ユーザーレコードに社員番号・初回ログイン日時を保存\n（なければ新規作成：UC-04で先に作られている場合あり）
+  alt E1 一意制約違反（同時ログイン）
+    DB --> API : 衝突
+    API -> API : 採番からやり直す
+  else E3 保存失敗
+    DB --> API : エラー
+    API -> DB : ROLLBACK（欠番を作らない：Q-02-3 推奨案）
+    API --> API : ログイン失敗
+  else 成功
+    API -> DB : COMMIT
+  end
+end
+API -> API : UC-01 に戻る
+
+note over API, DB
+  A1 再入会した人は以前の番号を保持しているため本UCは起動しない（UC-03）。
+  D-4 既存の番号は引き継がず、全員を新規に発番する。
+end note
+@enduml

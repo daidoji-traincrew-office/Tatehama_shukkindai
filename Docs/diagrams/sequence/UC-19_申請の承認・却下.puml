@@ -1,0 +1,63 @@
+@startuml UC-19
+!include ../common/style.iuml
+title UC-19 申請を承認・却下する
+autonumber
+actor "主催者 /\n共同主催者" as Org
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+participant "Discord Bot" as Bot
+actor "申請者" as Applicant
+
+Org -> App : 申請一覧を開く（DMから / 運転会画面から）
+App -> API : GET 申請一覧（申請中）
+API --> App : 申請一覧
+Org -> App : 申請を選ぶ
+App -> API : GET 申請詳細 + 対象の枠の現在の担当状況 + 出勤台バージョン
+API --> App : 申請内容・担当状況
+opt E3 申請後に対象の枠が書き換えられている
+  App -> Org : 警告「申請時から出勤台が変わっています」
+end
+alt 承認
+  Org -> App : 反映内容を決める（申請内容が初期値。A1 内容を変えて承認も可）
+  note right of App
+    ・離脱（行路）：担当を指定列車までに縮め、残りは後任 or 空き（Q-20-2）
+    ・離脱（シフト）：終了時刻を離脱時刻に早め、後任は新しい枠に入れる（Q-20-1）
+    ・参加：入れる枠と開始位置を決める
+    ・見習いが関わる場合は指導員の付け外し（UC-17 と同じ）
+    ・A2 対象が複数ならまとめて承認（一部だけの承認はしない：I-4）
+  end note
+  Org -> App : 「承認」
+  App -> API : POST 承認（反映内容 + 出勤台バージョン）
+  API -> API : 検証：申請中か（E2）・バージョン照合（E1）・\nロール条件（E4）・指導員なし警告
+  alt E2 処理済み / 取り下げ済み
+    API --> App : 409 + 現在の状態
+  else E1 バージョン不一致
+    API --> App : 409 Conflict（申請は「申請中」のまま）
+    App -> Org : 警告 → 読み込み直し
+  else E4 ロール不足
+    API --> App : 422
+  else
+    group 1トランザクション（Q-19-1 推奨案：承認と同時に反映）
+      API -> DB : 申請 =「承認」、処理者・処理日時
+      API -> DB : 出勤台を書き換え（バージョン+1）、変更履歴（Q-20-5）
+    end
+    API -> Bot : 通知を依頼
+    Bot -> Applicant : DM：承認と実際に反映した内容
+    API --> App : 200 + 警告
+    App -> Org : 結果と警告を表示
+  end
+else 却下
+  Org -> App : 却下理由（任意：Q-19-3 推奨案）を入力して「却下」
+  App -> API : POST 却下
+  API -> DB : 申請 =「却下」、処理者・処理日時・理由（出勤台は変えない）
+  API -> Bot : 通知を依頼
+  Bot -> Applicant : DM：却下と理由
+  API --> App : 200
+end
+opt E5 DM送信失敗
+  Bot --> API : 失敗
+  API -> DB : 送信失敗を記録（承認・却下はそのまま）
+end
+note over Org, Applicant : A3 主催者・共同主催者は自分の申請も処理できる（Q-19-2 推奨案）。
+@enduml

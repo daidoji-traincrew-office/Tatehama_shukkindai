@@ -1,0 +1,59 @@
+@startuml pkg-roster
+!include ../common/style.iuml
+title ユースケース図：出勤台（UC-15〜21）
+left to right direction
+skinparam packageStyle rectangle
+
+actor "運転士 /\n見習い運転士" as Driver
+actor "参加者本人\n(出勤台に載る人)" as Part
+actor "主催者 /\n共同主催者" as Org
+actor "Discord Bot" as Bot <<system>>
+actor "事業本部\n(管理者)" as Admin
+
+rectangle "出勤台" {
+  usecase "UC-15 行路を希望する\n(1人1行路：D-5)" as UC15
+  usecase "希望を取り消す" as Cancel
+  usecase "UC-16 人気行路を抽選する" as UC16
+  usecase "再抽選\n(Q-16-4 推奨)" as ReDraw
+  usecase "UC-17 枠に人を割り当てる" as UC17
+  usecase "指導員を付ける" as Inst
+  usecase "UC-18 途中離脱・途中参加\nを申請する" as UC18
+  usecase "申請を取り下げる\n(Q-18-4 推奨)" as Withdraw
+  usecase "UC-19 申請を承認・却下する" as UC19
+  usecase "UC-20 出勤台を直接書き換える\n(途中離脱/参加/行路分割)" as UC20
+  usecase "UC-21 出勤台を確定・\nアーカイブする" as UC21
+  usecase "UC-07 最終参加日を更新\n(B運転会のみ)" as UC07
+  usecase "保存時バージョン照合" as Ver
+}
+
+Driver --> UC15
+Cancel .> UC15 : <<extend>>
+Org --> UC16
+ReDraw .> UC16 : <<extend>>
+UC16 ..> UC17 : 当選者を登録
+Org --> UC17
+UC17 ..> Inst : <<include>>\n見習いのとき
+Part --> UC18
+Withdraw .> UC18 : <<extend>>
+UC18 --> Bot : 主催者・共同主催者へDM
+Org --> UC19
+UC19 ..> UC20 : <<include>>\n承認時に反映
+UC19 --> Bot : 申請者へ結果DM
+Org --> UC20
+Org --> UC21
+UC21 ..> UC07 : <<include>>
+UC21 --> Bot : DBダンプを投稿
+Bot --> Admin : 失敗時に通知 (D-6)
+UC17 ..> Ver : <<include>>
+UC19 ..> Ver : <<include>>
+UC20 ..> Ver : <<include>>
+
+note right of UC16
+  【保留】抽選タイミング（手動 / 締切で自動）。
+  図では主催者の手動実行を仮置き。
+end note
+note right of UC21
+  【保留】確定の仕方。図では主催者の手動確定を仮置き。
+  未処理の申請が残っていると確定不可（Q-21-1 推奨）。
+end note
+@enduml

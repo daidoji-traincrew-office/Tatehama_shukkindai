@@ -1,0 +1,42 @@
+@startuml pkg-auth-member
+!include ../common/style.iuml
+title ユースケース図：認証・社員（UC-01〜03）
+left to right direction
+skinparam packageStyle rectangle
+
+actor "利用者\n(Discordメンバー)" as User
+actor "Discord Bot" as Bot <<system>>
+actor "Discord\n(OAuth / Gateway)" as Discord <<external>>
+actor "GitHub Releases" as GH <<external>>
+
+rectangle "認証・社員" {
+  usecase "UC-01 ログインする" as UC01
+  usecase "最新版を確認する" as CheckVer
+  usecase "Discordサーバーの\nメンバーか確認する\n(Botのギルドキャッシュ)" as Member
+  usecase "最低対応バージョンを判定する\n(出勤台APIの呼び出しごと：D-11)" as MinVer
+  usecase "保存済みトークンで\nOAuthを省略する\n(refreshのたびにメンバー確認：D-10)" as Token
+  usecase "UC-02 社員番号を自動発番する\n(西暦下3桁+月2桁+連番3桁)" as UC02
+  usecase "UC-03 退会を反映する" as UC03L
+  usecase "UC-03 再入会を反映する\n(以前の社員番号を使う)" as UC03J
+}
+
+User --> UC01
+UC01 ..> CheckVer : <<include>>
+UC01 ..> Member : <<include>>
+UC01 ..> MinVer : <<include>>
+Token .> UC01 : <<extend>>
+UC01 ..> UC02 : <<include>>\n社員番号が未発番のとき
+CheckVer --> GH
+UC01 --> Discord
+
+Discord --> Bot : メンバー参加/退会イベント
+Member --> Bot
+Bot --> UC03L
+Bot --> UC03J
+
+note right of UC01
+  D-9：Discordサーバーのメンバーでない人
+  （未参加・退会済み）はログイン拒否。
+  退会済みの人の記録の閲覧は管理者が対応する。
+end note
+@enduml

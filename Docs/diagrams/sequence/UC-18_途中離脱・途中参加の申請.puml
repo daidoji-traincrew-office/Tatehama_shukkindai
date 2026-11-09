@@ -1,0 +1,54 @@
+@startuml UC-18
+!include ../common/style.iuml
+title UC-18 途中離脱・途中参加を申請する
+autonumber
+actor "参加者本人" as User
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+participant "Discord Bot" as Bot
+actor "主催者 /\n共同主催者" as Org
+
+alt 途中離脱
+  User -> App : 「途中離脱を申請」
+  App -> API : GET 自分が載っている枠
+  API --> App : 行路・シフト枠の一覧
+  User -> App : 離脱する枠を選ぶ（A1 複数可）
+  User -> App : 位置を指定（Q-18-2 推奨案）\n・行路：最後に担当する列車\n・シフト：離脱する時刻
+  opt A3 自分が指導員
+    App -> User : 「見習いが指導員なしになります」（申請は可能）
+  end
+else 途中参加
+  User -> App : 「途中参加を申請」
+  App -> User : 役職を選ぶ（持っているロールの役職だけ）
+  User -> App : 参加開始の位置（列車 / 時刻）\n希望の枠は任意で指定（Q-18-3 推奨案）
+end
+User -> App : 理由（任意）を入力して送信
+App -> API : POST 申請（出勤台バージョンつき）
+API -> API : 検証\n・期間内：運転会作成後〜確定前（Q-18-1 推奨案）\n・離脱：対象の枠に本人が載っている\n・参加：その役職のロールを持つ\n・同じ内容の「申請中」がない
+alt E1 枠に載っていない
+  API --> App : 409 + 最新の出勤台
+  App -> User : 最新の出勤台を再表示
+else E2 ロールなし / E3 期間外・確定済み
+  API --> App : 403 / 409
+else E4 同じ申請が申請中
+  API --> App : 409 + 既存の申請
+  App -> User : 既存の申請を表示
+else
+  API -> DB : 申請を「申請中」で保存
+  API -> Bot : 通知を依頼
+  Bot -> Org : DM：申請者・種類・対象の枠・位置・理由
+  alt E5 DM送信失敗
+    Bot --> API : 失敗
+    API -> DB : 送信失敗を記録\n（主催者はアプリの申請一覧 UC-19 で確認できる）
+  end
+  API --> App : 201
+  App -> User : 「申請しました」
+end
+opt A2 取り下げ（Q-18-4 推奨案：処理前なら可・通知なし）
+  User -> App : 「取り下げ」
+  App -> API : PATCH 申請（取下げ）
+  API -> DB : 状態=「取下げ」
+end
+note over User, Org : I-3 申請は本人だけが行う。代理が必要な場面は UC-20 の直接書き換えで対応する。
+@enduml

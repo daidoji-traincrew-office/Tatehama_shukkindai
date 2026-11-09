@@ -1,0 +1,31 @@
+@startsalt ui-15
+skinparam defaultFontName "Yu Gothic UI"
+title 想定UI：15 アルコール検査（UC-27：演出のみ）
+{
+  {+
+    <b>アルコール検査                                 | [ X ]
+    ==
+    .
+    . | <size:16>息を吹きかけてください…</size> | .
+    . | ■■■■■■□□□□ 検査中 | .
+    .
+    [ ] 酒飲んでますモード（アプリを閉じるまで） | [X] 検知音を鳴らす
+    . | [検査する] | .
+  }
+  .
+  {+
+    <b>検査結果（検知なし）                           | [ X ]
+    ==
+    . | <color:green><size:16>アルコールは検出されませんでした</size></color> | .
+    . | ご安全に！ | .
+  }
+  .
+  {+
+    <back:red><color:white><b>  !!! アルコールを検知しました !!!                         </b></color></back>
+    ==
+    <back:red><color:white>  ピーーーーッ（検知音）                                      </color></back>
+    <back:red><color:white>  画面全体が赤くなり、数秒で元の画面に戻ります               </color></back>
+    <back:red><color:white>  ※ 演出のみ。出勤処理には一切影響しません                   </color></back>
+  }
+}
+@endsalt

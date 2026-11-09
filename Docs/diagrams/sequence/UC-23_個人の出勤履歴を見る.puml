@@ -1,0 +1,43 @@
+@startuml UC-23
+!include ../common/style.iuml
+title UC-23 個人の出勤履歴を見る
+autonumber
+actor "利用者" as User
+participant "デスクトップアプリ" as App
+participant "APIサーバー" as API
+database "DB" as DB
+
+alt 本人
+  User -> App : 「自分の出勤履歴」を開く
+else 指導員・管理者
+  User -> App : 期限一覧（UC-22）の行から開く\nまたは社員番号・ハンドルネームで検索（Q-23-4 推奨案）
+end
+App -> API : GET 出勤履歴（対象者）
+alt E1 セッション切れ / 最低バージョン未満
+  API --> App : 401 / 426
+end
+API -> DB : 対象者を取得
+alt E3 対象者なし
+  API --> App : 404
+  App -> User : 「該当する社員がいません」
+else
+  API -> API : 閲覧範囲を判定（利用者のロール × 各記録の役職）
+  alt E2 範囲内の記録が1件もない対象者
+    API --> App : 403
+    App -> User : 「この人の記録を閲覧する権限がありません」
+  else
+    API -> DB : 確定済み運転会の出勤記録のみ取得（Q-23-2 推奨案）
+    API -> API : 範囲外の記録は除く（A3：Q-23-1 推奨案）
+    API --> App : 記録の一覧\n・運転会：名前・A/B・開催日\n・役職と立場（見習い / 正業 / 指導員）\n・運転士：ダイヤ名・行路・担当列車番号\n・信号：区割り・開始〜終了\n・指令：開始〜終了\n・同じ枠の相手（見習い / 指導員）
+    alt A1 記録なし
+      App -> User : 「出勤記録はありません」
+    else
+      App -> User : 開催日の新しい順に表示\n（A2 退会済みなら「退会済み」を明示）
+    end
+  end
+end
+opt 運転会を選ぶ（Q-23-5 推奨案）
+  User -> App : 運転会の行を選ぶ
+  App -> App : UC-24 確定済み出勤台へ遷移
+end
+@enduml
