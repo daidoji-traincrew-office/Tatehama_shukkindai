@@ -52,5 +52,6 @@ public class CertificateLogTest
         Assert.Equal(7107, CertificateLog.CertificateRotationFailedId);
         Assert.Equal(7113, CertificateLog.UnexpectedPublicFileId);
         Assert.Equal(7114, CertificateLog.CertificateDirectoryEmptyId);
+        Assert.Equal(7115, CertificateLog.InUseSigningCertificateMissingId);
     }
 }

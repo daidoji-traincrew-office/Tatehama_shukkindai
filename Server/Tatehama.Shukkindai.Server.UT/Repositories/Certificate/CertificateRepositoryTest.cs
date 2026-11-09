@@ -19,6 +19,8 @@ public sealed class CertificateRepositoryTest : IDisposable
 
     public void Dispose() => _directory.Dispose();
 
+    private static readonly IReadOnlyDictionary<string, byte[]> NoRetained = new Dictionary<string, byte[]>();
+
     private string PurposeDirectory(string name) => Path.Combine(_directory.Path, name);
     private string PublicDirectory => Path.Combine(_directory.Path, "public");
 
@@ -125,7 +127,7 @@ public sealed class CertificateRepositoryTest : IDisposable
         var first = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-10), Now.AddDays(100));
         var second = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(40), Now.AddDays(770));
 
-        var changes = _repository.SyncPublic([first, second]);
+        var changes = _repository.SyncPublic([first, second], NoRetained);
 
         Assert.Equal(2, changes.Count);
         var files = Directory.GetFiles(PublicDirectory).Select(Path.GetFileName).Order().ToList();
@@ -147,7 +149,7 @@ public sealed class CertificateRepositoryTest : IDisposable
 
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
 
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
 
         Assert.Equal((UnixFileMode)0b111_101_101, File.GetUnixFileMode(PublicDirectory)); // 0755
         Assert.Equal((UnixFileMode)0b110_100_100,
@@ -159,12 +161,12 @@ public sealed class CertificateRepositoryTest : IDisposable
     {
         var keep = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-10), Now.AddDays(100));
         var removed = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-20), Now.AddDays(90));
-        _repository.SyncPublic([keep, removed]);
+        _repository.SyncPublic([keep, removed], NoRetained);
         File.WriteAllBytes(Path.Combine(PublicDirectory, "stray.cer"), [1, 2, 3]);
         File.WriteAllText(Path.Combine(PublicDirectory, "README.txt"), "memo");
         _repository.Delete(removed);
 
-        var changes = _repository.SyncPublic([keep]);
+        var changes = _repository.SyncPublic([keep], NoRetained);
 
         Assert.Contains($"-server-signing-{removed.Thumbprint}.cer", changes);
         Assert.Contains("-stray.cer", changes);
@@ -173,23 +175,74 @@ public sealed class CertificateRepositoryTest : IDisposable
     }
 
     [Fact]
+    public void SyncPublic_RetainedKeyWithoutPfx_KeepsItsExistingCerUntouched()
+    {
+        var keep = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-10), Now.AddDays(100));
+        var gone = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-20), Now.AddDays(90));
+        _repository.SyncPublic([keep, gone], NoRetained);
+        var goneCer = Path.Combine(PublicDirectory, $"server-signing-{gone.Thumbprint}.cer");
+        var before = File.ReadAllBytes(goneCer);
+        _repository.Delete(gone);
+        File.WriteAllBytes(Path.Combine(PublicDirectory, "stray.cer"), [1, 2, 3]);
+
+        // 渡された中身が違っても、既にある .cer は書き直さない
+        var changes = _repository.SyncPublic([keep], new Dictionary<string, byte[]> { [gone.Thumbprint] = [9, 9, 9] });
+
+        Assert.Equal(["-stray.cer"], changes);
+        Assert.Equal(before, File.ReadAllBytes(goneCer));
+    }
+
+    [Fact]
+    public void SyncPublic_RetainedKeyWithoutPfxAndCer_WritesCerFromGivenBytes()
+    {
+        var keep = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-10), Now.AddDays(100));
+        var gone = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-20), Now.AddDays(90));
+        byte[] der;
+        using (var certificate = _repository.Load(gone))
+        {
+            der = certificate.Export(X509ContentType.Cert);
+        }
+
+        _repository.Delete(gone);
+
+        var changes = _repository.SyncPublic([keep], new Dictionary<string, byte[]> { [gone.Thumbprint] = der });
+
+        Assert.Contains($"+server-signing-{gone.Thumbprint}.cer", changes);
+        Assert.Equal(der, File.ReadAllBytes(Path.Combine(PublicDirectory, $"server-signing-{gone.Thumbprint}.cer")));
+        // 2 回目は変わらない
+        Assert.Empty(_repository.SyncPublic([keep], new Dictionary<string, byte[]> { [gone.Thumbprint] = der }));
+    }
+
+    [Fact]
+    public void SyncPublic_RetainedKeyStillHasPfx_UsesPfxContent()
+    {
+        var info = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-10), Now.AddDays(100));
+
+        _repository.SyncPublic([info], new Dictionary<string, byte[]> { [info.Thumbprint] = [9, 9, 9] });
+
+        using var cer = X509CertificateLoader.LoadCertificateFromFile(
+            Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer"));
+        Assert.Equal(info.Thumbprint, cer.Thumbprint);
+    }
+
+    [Fact]
     public void SyncPublic_Unchanged_ChangesNothing()
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
 
-        Assert.Empty(_repository.SyncPublic([info]));
+        Assert.Empty(_repository.SyncPublic([info], NoRetained));
     }
 
     [Fact]
     public void SyncPublic_CerContentDiffers_RewritesIt()
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
         var cerPath = Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer");
         File.WriteAllBytes(cerPath, [1, 2, 3]);
 
-        var changes = _repository.SyncPublic([info]);
+        var changes = _repository.SyncPublic([info], NoRetained);
 
         Assert.Single(changes);
         using var cer = X509CertificateLoader.LoadCertificateFromFile(cerPath);
@@ -201,7 +254,7 @@ public sealed class CertificateRepositoryTest : IDisposable
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
 
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
 
         Assert.DoesNotContain(Directory.GetFiles(PublicDirectory), f => f.EndsWith(".tmp"));
     }
@@ -210,7 +263,7 @@ public sealed class CertificateRepositoryTest : IDisposable
     public void SyncPublic_TemporaryFilesOlderThanOneDay_AreRemoved()
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
         var stale = Path.Combine(PublicDirectory, ".stale.tmp");
         var fresh = Path.Combine(PublicDirectory, ".fresh.tmp");
         var staleInPurpose = Path.Combine(PurposeDirectory("server-signing"), ".stale.tmp");
@@ -220,7 +273,7 @@ public sealed class CertificateRepositoryTest : IDisposable
         File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-2));
         File.SetLastWriteTimeUtc(staleInPurpose, DateTime.UtcNow.AddDays(-2));
 
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
 
         Assert.False(File.Exists(stale));
         Assert.False(File.Exists(staleInPurpose));
@@ -290,7 +343,7 @@ public sealed class CertificateRepositoryTest : IDisposable
     public async Task SyncPublic_ReplacingExistingCer_NeverLeavesTheFileMissing()
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
         var cerPath = Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer");
         File.WriteAllBytes(cerPath, [1, 2, 3]);
         var missing = 0;
@@ -309,7 +362,7 @@ public sealed class CertificateRepositoryTest : IDisposable
         for (var i = 0; i < 20; i++)
         {
             File.WriteAllBytes(cerPath, [1, 2, 3]);
-            _repository.SyncPublic([info]);
+            _repository.SyncPublic([info], NoRetained);
         }
 
         stop.Cancel();
@@ -323,7 +376,7 @@ public sealed class CertificateRepositoryTest : IDisposable
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
         Assert.False(_repository.IsPublished(info));
 
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
         Assert.True(_repository.IsPublished(info));
 
         File.WriteAllBytes(Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer"), [1]);
@@ -334,7 +387,7 @@ public sealed class CertificateRepositoryTest : IDisposable
     public void FindUnexpectedPublicFiles_PfxAndOtherFiles_AreReportedButCerAndTmpAreNot()
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now, Now.AddDays(10));
-        _repository.SyncPublic([info]);
+        _repository.SyncPublic([info], NoRetained);
         File.WriteAllText(Path.Combine(PublicDirectory, "leaked.pfx"), "x");
         File.WriteAllText(Path.Combine(PublicDirectory, "notes.txt"), "x");
         File.WriteAllText(Path.Combine(PublicDirectory, ".abc.tmp"), "x");

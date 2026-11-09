@@ -129,7 +129,8 @@ public sealed class CertificateRepository : ICertificateRepository
 
     public void Delete(CertificateInfo certificate) => File.Delete(certificate.Path);
 
-    public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signingCertificates)
+    public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signingCertificates,
+        IReadOnlyDictionary<string, byte[]> retainedPublicKeys)
     {
         // public/ は Crew と TTC が読むので 0755(cert/ 本体は 0700 のまま)
         EnsureDirectory(_root, PrivateDirectoryMode);
@@ -143,6 +144,25 @@ public sealed class CertificateRepository : ICertificateRepository
             using var certificate = Load(info);
             // X509ContentType.Cert は公開鍵だけの DER
             expected[CerFileName(info.Thumbprint)] = certificate.Export(X509ContentType.Cert);
+        }
+
+        // pfx が無くなっても、プロセスがまだ署名に使っている鍵の .cer は残す(Crew と TTC が検証できなくなるため)。
+        // pfx から作れないので、中身は呼び出し側(メモリ上の証明書)から受け取る。pfx がある鍵は上で作った方を優先する。
+        // 既に .cer があれば書き直さず(下の 2 を飛ばす)、無いときだけ書き戻す。
+        var retained = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (thumbprint, bytes) in retainedPublicKeys)
+        {
+            var name = CerFileName(thumbprint);
+            if (expected.ContainsKey(name))
+            {
+                continue;
+            }
+
+            retained.Add(name);
+            if (!File.Exists(Path.Combine(PublicDirectory, name)))
+            {
+                expected[name] = bytes;
+            }
         }
 
         // --- 2. 無い・内容が違う .cer を書く(先に書く。消す前に新しい鍵を公開しておくため) ---
@@ -165,7 +185,7 @@ public sealed class CertificateRepository : ICertificateRepository
                      .Where(p => string.Equals(Path.GetExtension(p), ".cer", StringComparison.OrdinalIgnoreCase)))
         {
             var name = Path.GetFileName(path);
-            if (!expected.ContainsKey(name))
+            if (!expected.ContainsKey(name) && !retained.Contains(name))
             {
                 File.Delete(path);
                 changes.Add("-" + name);

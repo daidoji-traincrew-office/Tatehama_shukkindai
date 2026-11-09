@@ -48,6 +48,9 @@ public sealed class CertificateService(
     private DateTimeOffset _processStart;
     private readonly Dictionary<CertificatePurpose, HashSet<string>> _inUse = new();
     private readonly Dictionary<CertificatePurpose, string> _inUseActive = new();
+
+    /// <summary>プロセスが署名に使っている鍵の .cer の中身(Thumbprint → 公開鍵だけの DER)。pfx が消えても .cer を残す・書き戻すための控え。</summary>
+    private readonly Dictionary<string, byte[]> _inUseSigningPublicKeys = new();
     private CertificateStatus _status = CertificateStatus.Empty;
 
     public CertificateStatus GetStatus()
@@ -142,6 +145,13 @@ public sealed class CertificateService(
             var targets = purpose == CertificatePurpose.ServerSigning ? signingCandidates : all[purpose].ToList();
             loaded[purpose] = targets.Select(repository.Load).ToList();
             _inUse[purpose] = targets.Select(c => c.Thumbprint).ToHashSet();
+            if (purpose == CertificatePurpose.ServerSigning)
+            {
+                foreach (var certificate in loaded[purpose])
+                {
+                    _inUseSigningPublicKeys[certificate.Thumbprint] = certificate.Export(X509ContentType.Cert);
+                }
+            }
             var active = CertificateRotationPolicy.SelectActive(targets, now);
             if (active is not null)
             {
@@ -343,10 +353,27 @@ public sealed class CertificateService(
         return true;
     }
 
-    /// <summary>Crew と TTC が読む <c>public/</c> の .cer を、署名用の pfx と一致させる。pfx を消したら .cer も消える。</summary>
+    /// <summary>Crew と TTC が読む <c>public/</c> の .cer を、署名用の pfx と一致させる。pfx を消したら .cer も消える(使用中の鍵を除く)。</summary>
     private void SyncPublic()
     {
-        var changes = repository.SyncPublic(repository.GetAll(CertificatePurpose.ServerSigning));
+        var signing = repository.GetAll(CertificatePurpose.ServerSigning);
+
+        // --- 1. 使用中の署名鍵の pfx が消えていないかを確かめる ---
+        // このプロセスは、起動時に読み込んだ鍵で再起動まで署名し続ける。その .cer を public/ から消すと、
+        // Crew と TTC が public/ を読み直したときに、発行済みのトークンを全部検証できなくなる(全員 401)。
+        // 人が誤って pfx を消した場合に備えて、使用中の鍵の .cer は再起動まで残す。次の再起動ではこの鍵は使えないので Error で知らせる。
+        var present = signing.Select(c => c.Thumbprint).ToHashSet();
+        var retained = _inUseSigningPublicKeys.Where(k => !present.Contains(k.Key))
+            .ToDictionary(k => k.Key, k => k.Value);
+        foreach (var thumbprint in retained.Keys.Order(StringComparer.Ordinal))
+        {
+            CertificateLog.InUseSigningCertificateMissing(logger, thumbprint,
+                Path.Combine(Path.GetFullPath(settings.Value.CertificateDirectory),
+                    CertificateLog.Name(CertificatePurpose.ServerSigning)));
+        }
+
+        // --- 2. .cer を同期する(消えた .cer の書き戻しと、使用中の鍵の保持は Repository が行う) ---
+        var changes = repository.SyncPublic(signing, retained);
         if (changes.Count > 0)
         {
             CertificateLog.PublicCertificatesChanged(logger, string.Join(", ", changes));

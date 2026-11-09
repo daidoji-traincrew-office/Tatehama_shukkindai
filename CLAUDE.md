@@ -58,8 +58,8 @@ Development 以外では、署名・暗号化の証明書を出勤台が自動�
 - 寿命 2 年。署名は残り 150 日で次の鍵を作って公開し、期限の 60 日前に切り替える(古い鍵は NotAfter + 7 日で削除)。暗号化(Server)は残り 60 日で次を作り NotAfter + 14 日まで残す。Client 用は残り 60 日、NotAfter + 1 日。
 - **切り替えは再起動のときだけ**(動いているプロセスの OpenIddict の options は作り直さない)。再起動が必要なことは、ログ `RestartRequired`(EventId 7105)とメトリクス `shukkindai.certificate.restart_required` で知らせる。運転会のない日に人が再起動する。
 - 有効な署名証明書が 1 つも無ければ、起動を止める。用途のディレクトリに pfx が 1 つも無いときも起動を止め、鍵を作って起動するのは `Authentication:AllowCertificateBootstrap=true` のときだけ(既定 false。初回のデプロイでだけ付け、鍵ができたら外す。`cert/` のマウント漏れで黙って新しい署名鍵で起動するのを防ぐ)。次の鍵の自動生成は、この設定に関係なく行う。
-- **不変条件**: `cert/public/` に同じ内容の `.cer` が無い署名鍵では署名しない(起動時の候補を公開済みの鍵に限る。`public/` を同期できなければ起動を止める)。古い鍵は NotAfter + 保持期間と、プロセスの起動 + 保持期間の両方を過ぎるまで消さない。起動時の確認(署名の有効性・時計)は、削除や生成より先に行い、止めるときは何も変えない。
-- 自動化のコードは `Services/Certificate/CertificateRotationPolicy`(純粋関数)・`Services/Certificate/CertificateService`・`Repositories/Certificate/`・`HostedService/CertificateRotationHostedService`。ログの EventId(7101〜7114)は固定なので変えない(アラートが使う)。
+- **不変条件**: `cert/public/` に同じ内容の `.cer` が無い署名鍵では署名しない(起動時の候補を公開済みの鍵に限る。`public/` を同期できなければ起動を止める)。古い鍵は NotAfter + 保持期間と、プロセスの起動 + 保持期間の両方を過ぎるまで消さない。このプロセスが署名に使っている鍵の .cer は、pfx が消えても再起動まで `public/` から消さない(消えていたら、メモリ上の証明書から書き戻し、7115 で知らせる)。起動時の確認(署名の有効性・時計)は、削除や生成より先に行い、止めるときは何も変えない。
+- 自動化のコードは `Services/Certificate/CertificateRotationPolicy`(純粋関数)・`Services/Certificate/CertificateService`・`Repositories/Certificate/`・`HostedService/CertificateRotationHostedService`。ログの EventId(7101〜7115)は固定なので変えない(アラートが使う)。
 - 手動の作業用に `Server/tools/gen-cert.cs` と `inspect-cert.cs`(`dotnet run Server/tools/gen-cert.cs -- ...`)がある。
 
 ## OpenTelemetry

@@ -27,9 +27,13 @@ public interface ICertificateRepository
     /// <summary>
     /// <c>public/</c> の .cer を、<paramref name="signingCertificates"/> と一致させる。
     /// 無いものは原子的に書き、内容が違うものは書き直し、余分な .cer は消す。古い一時ファイルも消す。
+    /// <paramref name="retainedPublicKeys"/>(Thumbprint → .cer の中身)は、pfx が無くなったがこのプロセスがまだ署名に使っている鍵。
+    /// その .cer は消さず、無ければこの中身で書き戻す(pfx からは作り直せないため、既に正しい .cer があれば書き直さない)。
+    /// 同じ Thumbprint の pfx が <paramref name="signingCertificates"/> にあれば、pfx の方を優先する。
     /// 返り値は、書いた・消した .cer のファイル名。
     /// </summary>
-    IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signingCertificates);
+    IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signingCertificates,
+        IReadOnlyDictionary<string, byte[]> retainedPublicKeys);
 
     /// <summary>
     /// <c>.rotation.lock</c> の排他ロックの中で実行する。複数のインスタンスが同じ <c>cert/</c> を共有していても、

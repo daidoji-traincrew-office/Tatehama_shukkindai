@@ -377,6 +377,94 @@ public sealed class CertificateServiceTest : IDisposable
         Assert.Equal(Start, service.GetStatus().LastRotationSuccess);
     }
 
+    // --- 動作中に使用中の署名 pfx が消えたとき ---
+
+    private string CerPath(CertificateInfo info) =>
+        Path.Combine(_directory.Path, "public", $"server-signing-{info.Thumbprint}.cer");
+
+    [Fact]
+    public void Maintain_OnlySigningPfxDeletedWhileRunning_KeepsItsCerAndLogsError()
+    {
+        SeedValidSetExceptSigning();
+        var signing = Seed(CertificatePurpose.ServerSigning, -10, 700);
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+        service.GetStartupCertificates();
+        var cerBefore = File.ReadAllBytes(CerPath(signing));
+        File.Delete(signing.Path);
+        _logger.Collector.Clear();
+        _time.Advance(TimeSpan.FromHours(24));
+
+        service.Maintain();
+
+        Assert.Equal(cerBefore, File.ReadAllBytes(CerPath(signing)));
+        Assert.Empty(Records(CertificateLog.PublicCertificatesChangedId));
+        var record = Assert.Single(Records(CertificateLog.InUseSigningCertificateMissingId));
+        Assert.Equal(LogLevel.Error, record.Level);
+        Assert.Contains(signing.Thumbprint, record.Message);
+        Assert.Single(Records(CertificateLog.CertificateDirectoryEmptyId));
+    }
+
+    [Fact]
+    public void Maintain_OneOfTwoSigningPfxsInUseDeleted_KeepsItsCerAndLogsError()
+    {
+        SeedValidSetExceptSigning();
+        var first = Seed(CertificatePurpose.ServerSigning, -10, 700);
+        var second = Seed(CertificatePurpose.ServerSigning, -5, 710);
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+        service.GetStartupCertificates();
+        File.Delete(first.Path);
+        _logger.Collector.Clear();
+        _time.Advance(TimeSpan.FromHours(24));
+
+        service.Maintain();
+
+        Assert.Equal(new[] { $"server-signing-{first.Thumbprint}.cer", $"server-signing-{second.Thumbprint}.cer" }.Order(),
+            PublicCers());
+        Assert.Contains(first.Thumbprint, Assert.Single(Records(CertificateLog.InUseSigningCertificateMissingId)).Message);
+        // 残っている pfx があるので、7114 は出ない
+        Assert.Empty(Records(CertificateLog.CertificateDirectoryEmptyId));
+    }
+
+    [Fact]
+    public void Maintain_SigningPfxNotInUseDeleted_DeletesItsCerAsBefore()
+    {
+        SeedValidSetExceptSigning();
+        var inUse = Seed(CertificatePurpose.ServerSigning, -10, 700);
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+        service.GetStartupCertificates();
+        // 起動後に増えた鍵(このプロセスは使っていない)
+        var later = Seed(CertificatePurpose.ServerSigning, 5, 730);
+        service.Maintain();
+        Assert.Contains($"server-signing-{later.Thumbprint}.cer", PublicCers());
+        File.Delete(later.Path);
+        _logger.Collector.Clear();
+
+        service.Maintain();
+
+        Assert.Equal([$"server-signing-{inUse.Thumbprint}.cer"], PublicCers());
+        Assert.Empty(Records(CertificateLog.InUseSigningCertificateMissingId));
+    }
+
+    [Fact]
+    public void Maintain_InUseSigningPfxAndCerBothDeleted_WritesCerBackFromMemory()
+    {
+        SeedValidSetExceptSigning();
+        var signing = Seed(CertificatePurpose.ServerSigning, -10, 700);
+        var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
+        service.GetStartupCertificates();
+        var cerBefore = File.ReadAllBytes(CerPath(signing));
+        File.Delete(signing.Path);
+        File.Delete(CerPath(signing));
+        _logger.Collector.Clear();
+        _time.Advance(TimeSpan.FromHours(24));
+
+        service.Maintain();
+
+        Assert.Equal(cerBefore, File.ReadAllBytes(CerPath(signing)));
+        Assert.Single(Records(CertificateLog.InUseSigningCertificateMissingId));
+        Assert.Contains($"+server-signing-{signing.Thumbprint}.cer", Assert.Single(Records(CertificateLog.PublicCertificatesChangedId)).Message);
+    }
+
     [Fact]
     public void Maintain_AllSucceed_UpdatesLastRotationSuccess()
     {
@@ -613,8 +701,8 @@ public sealed class CertificateServiceTest : IDisposable
             purpose == failingPurpose ? throw new IOException("disk full") : inner.Create(purpose, notBefore, notAfter);
 
         public void Delete(CertificateInfo certificate) => inner.Delete(certificate);
-        public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signing) =>
-            failSyncPublic ? throw new IOException("read-only file system") : inner.SyncPublic(signing);
+        public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signing, IReadOnlyDictionary<string, byte[]> retained) =>
+            failSyncPublic ? throw new IOException("read-only file system") : inner.SyncPublic(signing, retained);
         public bool IsPublished(CertificateInfo c) => inner.IsPublished(c);
         public IReadOnlyList<string> FindUnexpectedPublicFiles() => inner.FindUnexpectedPublicFiles();
         public T WithLock<T>(Func<T> action) => inner.WithLock(action);
@@ -631,7 +719,7 @@ public sealed class CertificateServiceTest : IDisposable
             inner.Create(purpose, notBefore, notAfter);
 
         public void Delete(CertificateInfo certificate) => inner.Delete(certificate);
-        public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signing) => [];
+        public IReadOnlyList<string> SyncPublic(IReadOnlyList<CertificateInfo> signing, IReadOnlyDictionary<string, byte[]> retained) => [];
         public bool IsPublished(CertificateInfo c) => published is not null && c.Thumbprint == published.Thumbprint;
         public IReadOnlyList<string> FindUnexpectedPublicFiles() => [];
         public T WithLock<T>(Func<T> action) => inner.WithLock(action);
