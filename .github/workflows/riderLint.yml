@@ -1,0 +1,66 @@
+name: Rider Lint
+
+on:
+  pull_request:
+    paths:
+      - '**/*.cs'
+      - '.editorconfig'
+      - '*.slnx.DotSettings'
+      - '.config/dotnet-tools.json'
+      - '.github/scripts/rider_lint.py'
+      - '.github/workflows/riderLint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore ReSharper CLI cache
+        id: rider-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/rider-lint
+          key: rider-lint-${{ runner.os }}-${{ hashFiles('.editorconfig', '*.slnx.DotSettings', '.config/dotnet-tools.json') }}
+
+      - name: Restore dependencies
+        run: dotnet restore Tatehama_shukkindai.slnx
+
+      - name: Restore dotnet tools
+        run: dotnet tool restore
+
+      # inspectcode / cleanupcode は --no-build で動かすため、先にビルドしておく
+      - name: Build
+        run: dotnet build --no-restore Tatehama_shukkindai.slnx
+
+      - name: Run Rider lint (changed lines only)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          BASE="$(git merge-base "origin/${BASE_REF:-main}" HEAD)"
+          python3 -I .github/scripts/rider_lint.py check --sln Tatehama_shukkindai.slnx \
+            --base "$BASE" --format github
+
+      - name: Save ReSharper CLI cache
+        if: always() && steps.rider-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/rider-lint
+          key: rider-lint-${{ runner.os }}-${{ hashFiles('.editorconfig', '*.slnx.DotSettings', '.config/dotnet-tools.json') }}

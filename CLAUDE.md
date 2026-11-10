@@ -13,6 +13,26 @@ dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 - TreatWarningsAsErrors を有効にしている。警告ゼロを保つこと。
 - ローカルの restore で `NETSDK1226`(prune package data が無い)が出たら、`AllowMissingPrunePackageData=true` を環境変数かプロパティで付ける(SDK に ASP.NET Core の targeting pack が無い環境の回避策。CI では不要)。
 
+## コードスタイル(Rider 検査)
+C# は JetBrains Rider(ReSharper)の検査で指摘が出ない形で書く。特に次の点。
+- ローカル変数は、型が明らかでなくても `var` で宣言する(`var sb = new StringBuilder();`、`var n = list.Count;`)。
+- フィールド・プロパティ・引数のオブジェクト生成は target-typed new にする(`private readonly Foo _x = new();`)。`var x = new Foo()` はそのままでよい。
+- コレクションの初期化は、使えるなら collection expression(`[]`)にする。
+- 要素を詰め替えるだけの `foreach` / `for` は書かず、LINQ にする。
+- 使っていないメンバー・`using`・変数を残さない。
+
+設定は `.editorconfig` と `Tatehama_shukkindai.slnx.DotSettings`(cleanupcode の `ClaudeCleanup` プロファイル)にある。
+
+### 自動検査(PostToolUse / Stop / SubagentStop フック)
+`.claude/settings.json` のフック(`.github/scripts/rider_lint.py hook`。Traincrew_MultiATS_Server と同じもの)が、Claude が `Edit` / `Write` / `MultiEdit` で触った `.cs` を記録し、応答の終わりにそのファイルの変更行へ `jb inspectcode` をかける。
+- 対象は PostToolUse で記録したファイルだけ。何も触っていなければ `jb` は動かない。
+- 機械的に直せる指摘(`var` 化、`new()` 化など)は `jb cleanupcode` で自動修正される。修正は**ファイル単位**で、触ったファイルの既存行にもかかる。ファイルが書き換わるので、差し戻されたら編集の前に読み直すこと。
+- 変更した行に残った指摘は exit 2 で差し戻される。直してから終えること(差し戻しは 1 回まで。2 回目と、`stop_hook_active` が既に true のときは通知だけで終わる)。
+- フックの想定外のエラーでは何もしない(fail-open)。python3 が要る。
+- 初回は `dotnet tool restore` と `dotnet restore` が要る(`--no-build` で動くので、ビルド済みであること)。
+- 手動実行: `python3 .github/scripts/rider_lint.py check --sln Tatehama_shukkindai.slnx --base HEAD --fix`
+- CI(`.github/workflows/riderLint.yml`)は PR で変更行を検査する(`ubuntu-latest`)。
+
 ## ディレクトリ
 - `Docs/`: 要件定義・ユースケース・計画・`authentication.md`
 - `Server/Tatehama.Shukkindai.Server`: ASP.NET Core(IdP + 将来の出勤台 API)。構造は Traincrew_MultiATS_Server に揃えている
