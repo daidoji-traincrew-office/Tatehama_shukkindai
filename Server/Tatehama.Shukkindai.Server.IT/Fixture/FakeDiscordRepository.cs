@@ -7,7 +7,7 @@ namespace Tatehama.Shukkindai.Server.IT.Fixture;
 public sealed class FakeDiscordRepository : IDiscordRepository
 {
     private readonly Dictionary<ulong, string> _members = new();
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>false にすると、Discord と同期できていない状態(Unavailable)になる。</summary>
     public bool Ready { get; set; } = true;

@@ -1,8 +1,7 @@
 using System.Net;
-using Microsoft.AspNetCore.Hosting;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -35,7 +34,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
     {
         using var env = new CertificateTestEnvironment();
         string kid;
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             kid = await LoginKid(client, fixture, "alice");
@@ -43,7 +42,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         }
 
         // 再起動しても、増えない・変わらない
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             Assert.Equal(kid, await LoginKid(client, fixture, "alice"));
@@ -64,7 +63,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         var old = env.Seed(CertificatePurpose.ServerSigning, -600, 100);
         var next = env.Seed(CertificatePurpose.ServerSigning, 40, 770);
 
-        using var factory = env.CreateFactory(fixture);
+        await using var factory = env.CreateFactory(fixture);
         using var client = factory.CreateIdpClient();
         var kid = await LoginKid(client, fixture, "bob");
 
@@ -80,7 +79,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         var old = env.Seed(CertificatePurpose.ServerSigning, -600, 100);
         var next = env.Seed(CertificatePurpose.ServerSigning, 40, 770);
 
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             Assert.Equal(old.Thumbprint, await LoginKid(client, fixture, "carol"));
@@ -98,7 +97,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         }
 
         // 再起動 → 次の鍵で署名される。古い鍵も、期限まで JWKS と public/ に残る
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             Assert.Equal(next.Thumbprint, await LoginKid(client, fixture, "carol"));
@@ -115,7 +114,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         using var env = new CertificateTestEnvironment();
         var old = env.Seed(CertificatePurpose.ServerSigning, -580, 150);
 
-        using var factory = env.CreateFactory(fixture);
+        await using var factory = env.CreateFactory(fixture);
         using var client = factory.CreateIdpClient();
 
         Assert.Equal(old.Thumbprint, await LoginKid(client, fixture, "dave"));
@@ -132,8 +131,8 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         using var env = new CertificateTestEnvironment();
         env.Seed(CertificatePurpose.ServerSigning, -900, -10);
 
-        using var factory = env.CreateFactory(fixture);
-        var exception = Record.Exception(() => factory.CreateIdpClient());
+        await using var factory = env.CreateFactory(fixture);
+        var exception = Record.Exception(factory.CreateIdpClient);
 
         Assert.NotNull(exception);
         Assert.Contains("有効なサーバー署名証明書がありません", exception.ToString());
@@ -149,7 +148,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         fixture.DiscordRepository.SetMember(id, "erin");
         string refreshToken;
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             refreshToken = (await Login(client, id)).RefreshToken!;
@@ -159,7 +158,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         env.Repository.Create(CertificatePurpose.ServerEncryption, env.Now.AddMinutes(-5), env.Now.AddDays(1000));
         Assert.Equal(2, env.PfxCount("server-encryption"));
 
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             var refreshed = await ReadToken(await Refresh(client, refreshToken));
@@ -174,7 +173,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         fixture.DiscordRepository.SetMember(id, "frank");
         string refreshToken;
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             refreshToken = (await Login(client, id)).RefreshToken!;
@@ -187,7 +186,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         }
 
         env.Repository.Create(CertificatePurpose.ServerEncryption, env.Now.AddMinutes(-5), env.Now.AddDays(1000));
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             var response = await Refresh(client, refreshToken);
@@ -204,7 +203,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         var expired = env.Seed(CertificatePurpose.ServerSigning, -900, -3);
         var valid = env.Seed(CertificatePurpose.ServerSigning, -100, 630);
 
-        using var factory = env.CreateFactory(fixture);
+        await using var factory = env.CreateFactory(fixture);
         using var client = factory.CreateIdpClient();
 
         Assert.Equal(valid.Thumbprint, await LoginKid(client, fixture, "grace"));
@@ -218,7 +217,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         var keys = Directory.EnumerateFiles(env.PublicDirectory, "*.cer")
             .Select(path => (SecurityKey)new X509SecurityKey(X509CertificateLoader.LoadCertificateFromFile(path)))
             .ToList();
-        return new TokenValidationParameters
+        return new()
         {
             ValidIssuer = WebApplicationFixture.Issuer,
             IssuerSigningKeys = keys,
@@ -240,7 +239,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         env.Seed(CertificatePurpose.ServerSigning, -600, 100);
         env.Seed(CertificatePurpose.ServerSigning, 40, 770);
         string before;
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             var id = NewDiscordId();
@@ -250,7 +249,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
 
         string after;
         env.Time.Advance(TimeSpan.FromDays(41));
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             var id = NewDiscordId();
@@ -279,7 +278,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         using var env = new CertificateTestEnvironment();
         using var factory = env.CreateFactory(fixture, b => b.UseSetting("Authentication:AllowCertificateBootstrap", "false"));
 
-        var exception = Record.Exception(() => factory.CreateIdpClient());
+        var exception = Record.Exception(factory.CreateIdpClient);
 
         Assert.NotNull(exception);
         var text = exception.ToString();
@@ -316,7 +315,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         File.WriteAllText(env.PublicDirectory, "not a directory");
         using var factory = env.CreateFactory(fixture);
 
-        var exception = Record.Exception(() => factory.CreateIdpClient());
+        var exception = Record.Exception(factory.CreateIdpClient);
 
         Assert.NotNull(exception);
         Assert.Contains("起動を中止", exception.ToString());
@@ -329,19 +328,18 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         using var env = new CertificateTestEnvironment();
         var old = env.Seed(CertificatePurpose.ServerSigning, -700, 1);
         var next = env.Seed(CertificatePurpose.ServerSigning, -10, 700);
-        string token;
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             var id = NewDiscordId();
             fixture.DiscordRepository.SetMember(id, "judy");
-            token = (await Login(client, id)).AccessToken;
+            var token = (await Login(client, id)).AccessToken;
             Assert.Equal(next.Thumbprint, DecodePart(token, 0).GetProperty("kid").GetString());
         }
 
         // 再起動を怠って、期限の 8 日後に再起動する。直前まで使っていた鍵(old)を、起動の最初に消さない
         env.Time.Advance(TimeSpan.FromDays(9));
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             Assert.True(File.Exists(old.Path));
@@ -357,7 +355,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         var id = NewDiscordId();
         fixture.DiscordRepository.SetMember(id, "kim");
         string refresh;
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             env.Time.Advance(TimeSpan.FromDays(95));
@@ -369,7 +367,7 @@ public sealed class CertificateRotationTest(WebApplicationFixture fixture)
         }
 
         // 再起動の直後に、old を消さない(消すと、直前に発行した refresh token が invalid_grant になる)
-        using (var factory = env.CreateFactory(fixture))
+        await using (var factory = env.CreateFactory(fixture))
         {
             using var client = factory.CreateIdpClient();
             Assert.True(File.Exists(old.Path));

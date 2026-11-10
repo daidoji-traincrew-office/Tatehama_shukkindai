@@ -36,8 +36,8 @@ public sealed class TestDiscordAuthenticationHandler(
 
         var id = Request.Headers[UserIdHeader].ToString();
         var identity = new ClaimsIdentity("ExternalLogin");
-        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, id));
-        await Context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity),
+        identity.AddClaim(new(ClaimTypes.NameIdentifier, id));
+        await Context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new(identity),
             properties);
         Response.Redirect(properties.RedirectUri!);
     }

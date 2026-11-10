@@ -12,7 +12,7 @@ namespace Tatehama.Shukkindai.Server.Repositories.Certificate;
 /// <see cref="CertificateRotationPolicy"/> が決める)。ここが担うのは、pfx の読み込み、鍵の生成と原子的な書き込み、
 /// 権限の設定、public/ の .cer の同期、cert/ 全体の排他ロック。呼ばれるのは起動時と 24 時間ごとの定期実行。
 /// </summary>
-public sealed class CertificateRepository : ICertificateRepository
+public sealed class CertificateRepository(string rootDirectory) : ICertificateRepository
 {
     public const string PublicDirectoryName = "public";
     public const string LockFileName = ".rotation.lock";
@@ -32,16 +32,11 @@ public sealed class CertificateRepository : ICertificateRepository
     /// <summary>これより古い一時ファイルは、書き込み中の残骸とみなして消す。</summary>
     private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromDays(1);
 
-    private readonly string _root;
+    private readonly string _root = Path.GetFullPath(rootDirectory);
 
     public CertificateRepository(IOptions<AuthenticationSettings> settings)
         : this(settings.Value.CertificateDirectory)
     {
-    }
-
-    public CertificateRepository(string rootDirectory)
-    {
-        _root = Path.GetFullPath(rootDirectory);
     }
 
     private string PurposeDirectory(CertificatePurpose purpose) =>
@@ -98,8 +93,8 @@ public sealed class CertificateRepository : ICertificateRepository
 
     private static CertificateInfo ToInfo(CertificatePurpose purpose, X509Certificate2 certificate, string path) =>
         new(purpose, certificate.Thumbprint,
-            new DateTimeOffset(certificate.NotBefore.ToUniversalTime(), TimeSpan.Zero),
-            new DateTimeOffset(certificate.NotAfter.ToUniversalTime(), TimeSpan.Zero), path);
+            new(certificate.NotBefore.ToUniversalTime(), TimeSpan.Zero),
+            new(certificate.NotAfter.ToUniversalTime(), TimeSpan.Zero), path);
 
     public X509Certificate2 Load(CertificateInfo certificate) =>
         X509CertificateLoader.LoadPkcs12FromFile(certificate.Path, string.Empty);
@@ -259,7 +254,7 @@ public sealed class CertificateRepository : ICertificateRepository
         var deadline = DateTime.UtcNow + LockTimeout;
         while (true)
         {
-            FileStream? stream = null;
+            FileStream stream;
             try
             {
                 var options = new FileStreamOptions
@@ -273,7 +268,7 @@ public sealed class CertificateRepository : ICertificateRepository
                     options.UnixCreateMode = PfxMode;
                 }
 
-                stream = new FileStream(lockPath, options);
+                stream = new(lockPath, options);
             }
             catch (IOException) when (DateTime.UtcNow < deadline)
             {

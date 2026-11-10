@@ -11,17 +11,15 @@ namespace Tatehama.Shukkindai.Server.IT.Controllers;
 [Collection(WebApplicationCollection.Name)]
 public sealed class HealthzTest(WebApplicationFixture fixture)
 {
-    private readonly WebApplicationFixture _factory = fixture;
-
     [Fact]
     public async Task Healthz_DiscordNotSynchronized_Returns503()
     {
-        using var client = _factory.CreateIdpClient();
+        using var client = fixture.CreateIdpClient();
 
         var ok = await client.GetAsync("healthz", Ct);
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
 
-        _factory.DiscordRepository.Ready = false;
+        fixture.DiscordRepository.Ready = false;
         try
         {
             var notReady = await client.GetAsync("healthz", Ct);
@@ -29,7 +27,7 @@ public sealed class HealthzTest(WebApplicationFixture fixture)
         }
         finally
         {
-            _factory.DiscordRepository.Ready = true;
+            fixture.DiscordRepository.Ready = true;
         }
     }
 
@@ -39,7 +37,7 @@ public sealed class HealthzTest(WebApplicationFixture fixture)
         // UseHttpLogging を UseRouting の前に置くと、エンドポイントごとの WithHttpLogging(None) が効かず、
         // 監視の /healthz が毎回ログに出てしまう。順序の修正を固定する
         var provider = new CapturingLoggerProvider();
-        using var factory = _factory.WithWebHostBuilder(builder =>
+        await using var factory = fixture.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddSingleton<ILoggerProvider>(provider)));
         using var client = factory.CreateIdpClient();
 

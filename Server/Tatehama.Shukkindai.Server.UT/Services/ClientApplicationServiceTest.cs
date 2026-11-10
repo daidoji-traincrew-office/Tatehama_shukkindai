@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Options;
 using Moq;
 using OpenIddict.Abstractions;
-using Tatehama.Shukkindai.Server.Services;
 using Tatehama.Shukkindai.Server.Configuration;
+using Tatehama.Shukkindai.Server.Services;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Tatehama.Shukkindai.Server.UT.Services;
@@ -14,7 +14,7 @@ public class ClientApplicationServiceTest
 
     public ClientApplicationServiceTest()
     {
-        _service = new ClientApplicationService(_manager.Object, Options.Create(new AuthenticationSettings
+        _service = new(_manager.Object, Options.Create(new AuthenticationSettings
         {
             ClientRedirectPorts = [51180, 51181],
         }));
@@ -36,7 +36,7 @@ public class ClientApplicationServiceTest
             }.Order(),
             d.Permissions.Order());
         Assert.Equal([Requirements.Features.ProofKeyForCodeExchange], d.Requirements);
-        Assert.Equal(new[] { "http://localhost:51180/", "http://localhost:51181/" },
+        Assert.Equal(["http://localhost:51180/", "http://localhost:51181/"],
             d.RedirectUris.Select(u => u.AbsoluteUri).Order());
     }
 

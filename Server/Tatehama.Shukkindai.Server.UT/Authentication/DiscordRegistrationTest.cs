@@ -30,8 +30,8 @@ public class DiscordRegistrationTest
             .Registrations.Single(r => r.ProviderName == OpenIddictClientWebIntegrationConstants.Providers.Discord);
 
         Assert.Null(registration.Configuration);
-        Assert.Equal(new Uri("https://discord.com/"), registration.Issuer);
-        Assert.Equal(new Uri("https://discord.com/.well-known/openid-configuration"),
+        Assert.Equal(new("https://discord.com/"), registration.Issuer);
+        Assert.Equal(new("https://discord.com/.well-known/openid-configuration"),
             registration.ConfigurationEndpoint);
         Assert.NotNull(registration.ConfigurationManager);
     }

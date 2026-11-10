@@ -14,12 +14,10 @@ namespace Tatehama.Shukkindai.Server.IT.Authentication;
 [Collection(WebApplicationCollection.Name)]
 public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
 {
-    private readonly WebApplicationFixture _factory = fixture;
-
     /// <summary>Crew と TTC が <c>cert/public/</c> から読む .cer を全部読む。</summary>
     private X509Certificate2 LoadCer()
     {
-        var path = Assert.Single(Directory.GetFiles(_factory.PublicDirectory, "*.cer"));
+        var path = Assert.Single(Directory.GetFiles(fixture.PublicDirectory, "*.cer"));
         return X509CertificateLoader.LoadCertificateFromFile(path);
     }
 
@@ -28,13 +26,13 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     {
         // Crew と TTC が行う静的検証そのもの
         var id = NewDiscordId();
-        _factory.DiscordRepository.SetMember(id, "bob");
-        using var client = _factory.CreateIdpClient();
+        fixture.DiscordRepository.SetMember(id, "bob");
+        using var client = fixture.CreateIdpClient();
         var token = await Login(client, id);
 
         using var cer = LoadCer();
         Assert.False(cer.HasPrivateKey);
-        var result = await new JsonWebTokenHandler().ValidateTokenAsync(token.AccessToken, new TokenValidationParameters
+        var result = await new JsonWebTokenHandler().ValidateTokenAsync(token.AccessToken, new()
         {
             ValidIssuer = WebApplicationFixture.Issuer,
             IssuerSigningKey = new X509SecurityKey(cer),
@@ -49,7 +47,7 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
 
         // 別の鍵では通らない
         using var other = RSA.Create(2048);
-        var wrong = await new JsonWebTokenHandler().ValidateTokenAsync(token.AccessToken, new TokenValidationParameters
+        var wrong = await new JsonWebTokenHandler().ValidateTokenAsync(token.AccessToken, new()
         {
             ValidIssuer = WebApplicationFixture.Issuer,
             IssuerSigningKey = new RsaSecurityKey(other),
@@ -62,8 +60,8 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     public async Task Discovery_Always_MatchesIssuerAndJwksMatchesCer()
     {
         var id = NewDiscordId();
-        _factory.DiscordRepository.SetMember(id, "carol");
-        using var client = _factory.CreateIdpClient();
+        fixture.DiscordRepository.SetMember(id, "carol");
+        using var client = fixture.CreateIdpClient();
         var token = await Login(client, id);
 
         var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
@@ -91,8 +89,8 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     {
         // openid を許すと、OpenIddict.Client が id_token を必須にしてクライアントがログインできなくなる
         var id = NewDiscordId();
-        _factory.DiscordRepository.SetMember(id, "judy");
-        using var client = _factory.CreateIdpClient();
+        fixture.DiscordRepository.SetMember(id, "judy");
+        using var client = fixture.CreateIdpClient();
 
         var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
         Assert.Equal(["offline_access"],
@@ -107,8 +105,8 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     public async Task Authorize_PkcePlain_IsRejectedAndDiscoveryAdvertisesS256Only()
     {
         var id = NewDiscordId();
-        _factory.DiscordRepository.SetMember(id, "kate");
-        using var client = _factory.CreateIdpClient();
+        fixture.DiscordRepository.SetMember(id, "kate");
+        using var client = fixture.CreateIdpClient();
 
         var discovery = await client.GetFromJsonAsync<JsonElement>(".well-known/openid-configuration", Ct);
         Assert.Equal(["S256"],
@@ -122,25 +120,25 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
     [Fact]
     public async Task Startup_FreshDirectory_CreatesSigningPfxAndMatchingPublicCer()
     {
-        using var client = _factory.CreateIdpClient();
+        using var client = fixture.CreateIdpClient();
         await client.GetAsync("healthz", Ct); // 起動させる
 
-        var pfxPath = Assert.Single(Directory.GetFiles(Path.Combine(_factory.CertificateDirectory, "server-signing"),
+        var pfxPath = Assert.Single(Directory.GetFiles(Path.Combine(fixture.CertificateDirectory, "server-signing"),
             "*.pfx"));
         using var pfx = X509CertificateLoader.LoadPkcs12FromFile(pfxPath, string.Empty);
         using var cer = LoadCer();
         Assert.Equal("CN=Tatehama Shukkindai Server Signing Certificate", cer.Subject);
         Assert.Equal(pfx.GetPublicKey(), cer.GetPublicKey());
         Assert.False(cer.HasPrivateKey);
-        Assert.Equal($"server-signing-{cer.Thumbprint}.cer", Path.GetFileName(Directory.GetFiles(_factory.PublicDirectory)[0]));
+        Assert.Equal($"server-signing-{cer.Thumbprint}.cer", Path.GetFileName(Directory.GetFiles(fixture.PublicDirectory)[0]));
 
         // 暗号化・Client 用も、初回は作る。pfx は public/ に置かない
         foreach (var name in new[] { "server-encryption", "client-signing", "client-encryption" })
         {
-            Assert.Single(Directory.GetFiles(Path.Combine(_factory.CertificateDirectory, name), "*.pfx"));
+            Assert.Single(Directory.GetFiles(Path.Combine(fixture.CertificateDirectory, name), "*.pfx"));
         }
 
-        Assert.DoesNotContain(Directory.GetFiles(_factory.PublicDirectory), f => f.EndsWith(".pfx"));
+        Assert.DoesNotContain(Directory.GetFiles(fixture.PublicDirectory), f => f.EndsWith(".pfx"));
     }
 
     [Fact]
@@ -151,16 +149,16 @@ public sealed class OpenIddictServerTest(WebApplicationFixture fixture)
             return;
         }
 
-        using var client = _factory.CreateIdpClient();
+        using var client = fixture.CreateIdpClient();
         await client.GetAsync("healthz", Ct);
 
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-            File.GetUnixFileMode(_factory.CertificateDirectory));
+            File.GetUnixFileMode(fixture.CertificateDirectory));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-            File.GetUnixFileMode(Path.Combine(_factory.CertificateDirectory, "server-signing")));
-        Assert.Equal((UnixFileMode)0b111_101_101, File.GetUnixFileMode(_factory.PublicDirectory));
+            File.GetUnixFileMode(Path.Combine(fixture.CertificateDirectory, "server-signing")));
+        Assert.Equal((UnixFileMode)0b111_101_101, File.GetUnixFileMode(fixture.PublicDirectory));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite,
-            File.GetUnixFileMode(Directory.GetFiles(Path.Combine(_factory.CertificateDirectory, "server-signing"))[0]));
-        Assert.Equal((UnixFileMode)0b110_100_100, File.GetUnixFileMode(Directory.GetFiles(_factory.PublicDirectory)[0]));
+            File.GetUnixFileMode(Directory.GetFiles(Path.Combine(fixture.CertificateDirectory, "server-signing"))[0]));
+        Assert.Equal((UnixFileMode)0b110_100_100, File.GetUnixFileMode(Directory.GetFiles(fixture.PublicDirectory)[0]));
     }
 }

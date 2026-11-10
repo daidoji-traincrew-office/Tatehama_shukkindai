@@ -54,7 +54,7 @@ public sealed class CertificateMetrics : IDisposable
             var inUse = purpose.InUseActive ?? CertificateRotationPolicy.SelectActive(purpose.Certificates, now);
             if (inUse is not null)
             {
-                yield return new Measurement<double>((inUse.NotAfter - now).TotalSeconds, Tag(purpose.Purpose));
+                yield return new((inUse.NotAfter - now).TotalSeconds, Tag(purpose.Purpose));
             }
         }
     }
@@ -67,7 +67,7 @@ public sealed class CertificateMetrics : IDisposable
             var newest = purpose.Certificates.MaxBy(c => c.NotAfter);
             if (newest is not null)
             {
-                yield return new Measurement<double>((newest.NotAfter - now).TotalSeconds, Tag(purpose.Purpose));
+                yield return new((newest.NotAfter - now).TotalSeconds, Tag(purpose.Purpose));
             }
         }
     }
@@ -77,7 +77,7 @@ public sealed class CertificateMetrics : IDisposable
         var now = _timeProvider.GetUtcNow();
         foreach (var purpose in _certificateService.GetStatus().Purposes)
         {
-            yield return new Measurement<int>(CertificateRotationPolicy.IsRestartRequired(purpose, now) ? 1 : 0,
+            yield return new(CertificateRotationPolicy.IsRestartRequired(purpose, now) ? 1 : 0,
                 Tag(purpose.Purpose));
         }
     }
@@ -88,7 +88,7 @@ public sealed class CertificateMetrics : IDisposable
         var signing = SigningStatus();
         if (signing is not null)
         {
-            yield return new Measurement<int>(
+            yield return new(
                 CertificateRotationPolicy.NextPending(signing.Certificates, now) is null ? 0 : 1);
         }
     }
@@ -99,7 +99,7 @@ public sealed class CertificateMetrics : IDisposable
         var next = SigningStatus() is { } signing ? CertificateRotationPolicy.NextPending(signing.Certificates, now) : null;
         if (next is not null)
         {
-            yield return new Measurement<double>((next.NotBefore - now).TotalSeconds);
+            yield return new((next.NotBefore - now).TotalSeconds);
         }
     }
 
@@ -107,7 +107,7 @@ public sealed class CertificateMetrics : IDisposable
     {
         if (_certificateService.GetStatus().LastRotationSuccess is { } last)
         {
-            yield return new Measurement<double>(last.ToUnixTimeSeconds());
+            yield return new(last.ToUnixTimeSeconds());
         }
     }
 

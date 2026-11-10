@@ -10,7 +10,7 @@ public class TokenPruningServiceTest
 {
     private readonly Mock<IOpenIddictTokenManager> _tokens = new();
     private readonly Mock<IOpenIddictAuthorizationManager> _authorizations = new();
-    private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 7, 0, 0, 0, TimeSpan.Zero));
+    private readonly FakeTimeProvider _time = new(new(2026, 11, 7, 0, 0, 0, TimeSpan.Zero));
 
     private TokenPruningService CreateService() => new(_tokens.Object, _authorizations.Object, _time,
         NullLogger<TokenPruningService>.Instance);

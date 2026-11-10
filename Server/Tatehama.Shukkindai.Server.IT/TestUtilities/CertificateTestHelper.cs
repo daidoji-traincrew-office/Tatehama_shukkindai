@@ -17,7 +17,7 @@ public sealed class CertificateTestEnvironment : IDisposable
     public string Directory { get; } = Path.Combine(Path.GetTempPath(), "shukkindai-it-rotation-" + Guid.NewGuid());
 
     /// <summary>OpenIddict と証明書の Service が共有する時計(DI の TimeProvider)。実時間に近い時刻から始める。</summary>
-    public FakeTimeProvider Time { get; } = new(new DateTimeOffset(DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond * TimeSpan.TicksPerSecond, TimeSpan.Zero));
+    public FakeTimeProvider Time { get; } = new(new(DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond * TimeSpan.TicksPerSecond, TimeSpan.Zero));
 
     public DateTimeOffset Now => Time.GetUtcNow();
 

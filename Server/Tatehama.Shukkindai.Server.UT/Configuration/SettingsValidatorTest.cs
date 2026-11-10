@@ -43,7 +43,7 @@ public class SettingsValidatorTest
     [Fact]
     public void Validate_DiscordSettingMissingEvenInDevelopment_Fails()
     {
-        var result = new DiscordSettingsValidator().Validate(null, new DiscordSettings());
+        var result = new DiscordSettingsValidator().Validate(null, new());
 
         Assert.True(result.Failed);
         Assert.Contains("Discord:BotToken は必須です。", result.Failures!);
@@ -55,7 +55,7 @@ public class SettingsValidatorTest
     [Fact]
     public void Validate_DiscordAllSet_Succeeds()
     {
-        var result = new DiscordSettingsValidator().Validate(null, new DiscordSettings
+        var result = new DiscordSettingsValidator().Validate(null, new()
         {
             ClientId = "a",
             ClientSecret = "b",

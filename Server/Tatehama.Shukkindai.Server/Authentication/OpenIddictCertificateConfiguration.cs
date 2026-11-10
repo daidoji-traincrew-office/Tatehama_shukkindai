@@ -22,13 +22,13 @@ public sealed class OpenIddictServerCertificateConfiguration(ICertificateService
         var certificates = certificateService.GetStartupCertificates();
         foreach (var certificate in certificates.Get(CertificatePurpose.ServerSigning))
         {
-            options.SigningCredentials.Add(new SigningCredentials(new X509SecurityKey(certificate),
+            options.SigningCredentials.Add(new(new X509SecurityKey(certificate),
                 SecurityAlgorithms.RsaSha256));
         }
 
         foreach (var certificate in certificates.Get(CertificatePurpose.ServerEncryption))
         {
-            options.EncryptionCredentials.Add(new EncryptingCredentials(new X509SecurityKey(certificate),
+            options.EncryptionCredentials.Add(new(new X509SecurityKey(certificate),
                 SecurityAlgorithms.RsaOAEP, SecurityAlgorithms.Aes256CbcHmacSha512));
         }
     }
@@ -46,13 +46,13 @@ public sealed class OpenIddictClientCertificateConfiguration(ICertificateService
         var certificates = certificateService.GetStartupCertificates();
         foreach (var certificate in certificates.Get(CertificatePurpose.ClientSigning))
         {
-            options.SigningCredentials.Add(new SigningCredentials(new X509SecurityKey(certificate),
+            options.SigningCredentials.Add(new(new X509SecurityKey(certificate),
                 SecurityAlgorithms.RsaSha256));
         }
 
         foreach (var certificate in certificates.Get(CertificatePurpose.ClientEncryption))
         {
-            options.EncryptionCredentials.Add(new EncryptingCredentials(new X509SecurityKey(certificate),
+            options.EncryptionCredentials.Add(new(new X509SecurityKey(certificate),
                 SecurityAlgorithms.RsaOAEP, SecurityAlgorithms.Aes256CbcHmacSha512));
         }
     }

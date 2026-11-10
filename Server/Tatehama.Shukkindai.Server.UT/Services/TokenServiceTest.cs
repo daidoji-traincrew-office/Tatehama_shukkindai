@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using OpenIddict.Abstractions;
-
 using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Services;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -20,7 +19,7 @@ public class TokenServiceTest
 
     public TokenServiceTest()
     {
-        _service = new TokenService(_discordService.Object, _observer.Object,
+        _service = new(_discordService.Object, _observer.Object,
             NullLogger<TokenService>.Instance);
     }
 
@@ -32,10 +31,10 @@ public class TokenServiceTest
     {
         var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name,
             Claims.Role);
-        if (sub is not null) identity.AddClaim(new Claim(Claims.Subject, sub));
-        identity.AddClaim(new Claim(Claims.Name, name));
+        if (sub is not null) identity.AddClaim(new(Claims.Subject, sub));
+        identity.AddClaim(new(Claims.Name, name));
         identity.SetScopes(scopes);
-        return new ClaimsPrincipal(identity);
+        return new(identity);
     }
 
     [Fact]
@@ -56,7 +55,7 @@ public class TokenServiceTest
         }
 
         // ユーザー由来の claim は sub と name だけ
-        Assert.Equal(new[] { Claims.Name, Claims.Subject },
+        Assert.Equal([Claims.Name, Claims.Subject],
             principal.Claims.Where(c => c.Type != Claims.Private.Scope).Select(c => c.Type).Order());
         _observer.Verify(o => o.OnUserLoggedIn(UserId, "alice", It.IsAny<CancellationToken>()), Times.Once);
     }

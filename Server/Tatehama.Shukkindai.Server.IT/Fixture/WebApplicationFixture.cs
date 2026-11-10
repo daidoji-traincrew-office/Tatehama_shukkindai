@@ -1,15 +1,8 @@
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Logging;
-using System.Security.Claims;
-using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
 using Tatehama.Shukkindai.Server.Authentication;
 using Tatehama.Shukkindai.Server.HostedService;
 using Tatehama.Shukkindai.Server.Repositories.Discord;

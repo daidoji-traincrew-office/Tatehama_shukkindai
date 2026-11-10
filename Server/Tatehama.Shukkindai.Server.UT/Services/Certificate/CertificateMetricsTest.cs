@@ -20,12 +20,12 @@ public sealed class CertificateMetricsTest : IDisposable
 
     public CertificateMetricsTest()
     {
-        _repository = new CertificateRepository(_directory.Path);
-        _service = new CertificateService(_repository, _time,
+        _repository = new(_directory.Path);
+        _service = new(_repository, _time,
             Microsoft.Extensions.Options.Options.Create(new Tatehama.Shukkindai.Server.Configuration.AuthenticationSettings
             { CertificateDirectory = _directory.Path, AllowCertificateBootstrap = true }),
             new FakeLogger<CertificateService>());
-        _metrics = new CertificateMetrics(_service, _time);
+        _metrics = new(_service, _time);
     }
 
     public void Dispose()
@@ -183,6 +183,8 @@ public sealed class CertificateMetricsTest : IDisposable
         };
         listener.Start(); // 既存の Meter の instrument も通知される
 
+        // 型を書かないと (string, string) になり、instruments と null 許容が合わず CS8620 になる
+        // ReSharper disable once RedundantExplicitArrayCreation
         Assert.Equal(
             new (string, string?)[]
             {

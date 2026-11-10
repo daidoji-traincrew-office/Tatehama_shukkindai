@@ -47,7 +47,7 @@ public sealed class ClientApplicationService(
         };
         foreach (var port in settings.Value.ClientRedirectPorts)
         {
-            descriptor.RedirectUris.Add(new Uri($"http://localhost:{port}/"));
+            descriptor.RedirectUris.Add(new($"http://localhost:{port}/"));
         }
 
         return descriptor;

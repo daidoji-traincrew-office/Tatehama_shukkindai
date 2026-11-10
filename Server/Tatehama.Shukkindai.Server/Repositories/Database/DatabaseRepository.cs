@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using Tatehama.Shukkindai.Server.Data;
 
 namespace Tatehama.Shukkindai.Server.Repositories.Database;

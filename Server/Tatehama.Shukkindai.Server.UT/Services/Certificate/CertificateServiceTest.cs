@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Tatehama.Shukkindai.Server.Configuration;
 using Microsoft.Extensions.Logging.Testing;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Models;
 using Tatehama.Shukkindai.Server.Repositories.Certificate;
 using Tatehama.Shukkindai.Server.Services.Certificate;
@@ -21,7 +21,7 @@ public sealed class CertificateServiceTest : IDisposable
 
     public CertificateServiceTest()
     {
-        _repository = new CertificateRepository(_directory.Path);
+        _repository = new(_directory.Path);
     }
 
     public void Dispose() => _directory.Dispose();
@@ -275,7 +275,7 @@ public sealed class CertificateServiceTest : IDisposable
 
         Assert.Equal(LogLevel.Error, Assert.Single(Records(CertificateLog.RestartRequiredId)).Level);
         // 次の鍵があるので、状態のログは上げすぎない(Warning まで)
-        var status = Assert.Single(Records(CertificateLog.CertificateSetStatusId), r => r.Message!.Contains("server-signing"));
+        var status = Assert.Single(Records(CertificateLog.CertificateSetStatusId), r => r.Message.Contains("server-signing"));
         Assert.Equal(LogLevel.Warning, status.Level);
     }
 
@@ -303,7 +303,7 @@ public sealed class CertificateServiceTest : IDisposable
 
         Assert.Equal(1, PfxCount("server-signing"));
         Assert.Equal([$"server-signing-{next.Thumbprint}.cer"], PublicCers());
-        Assert.Contains(Records(CertificateLog.CertificateDeletedId), r => r.Message!.Contains(old.Thumbprint));
+        Assert.Contains(Records(CertificateLog.CertificateDeletedId), r => r.Message.Contains(old.Thumbprint));
     }
 
     [Fact]
@@ -490,11 +490,11 @@ public sealed class CertificateServiceTest : IDisposable
         var sets = Records(CertificateLog.CertificateSetStatusId).ToList();
         Assert.Equal(4, sets.Count);
         Assert.All(sets, r => Assert.Equal(LogLevel.Information, r.Level));
-        var signing = sets.Single(r => r.Message!.Contains("server-signing"));
+        var signing = sets.Single(r => r.Message.Contains("server-signing"));
         Assert.Equal(729, Convert.ToInt32(signing.StructuredState!.Single(p => p.Key == "RemainingDays").Value));
         Assert.Equal("server-signing", signing.StructuredState!.Single(p => p.Key == "CertificatePurpose").Value);
         // 日時は culture 依存にならない文字列
-        var usableUntil = (string)signing.StructuredState!.Single(p => p.Key == "UsableUntil").Value!;
+        var usableUntil = signing.StructuredState!.Single(p => p.Key == "UsableUntil").Value!;
         Assert.True(DateTimeOffset.TryParse(usableUntil, null, System.Globalization.DateTimeStyles.RoundtripKind, out _));
         Assert.EndsWith("Z", usableUntil);
     }
@@ -508,7 +508,7 @@ public sealed class CertificateServiceTest : IDisposable
         CreateService().GetStartupCertificates();
 
         Assert.Equal(LogLevel.Error, Assert.Single(Records(CertificateLog.CertificateCreatedId),
-            r => r.Message!.Contains("server-signing")).Level);
+            r => r.Message.Contains("server-signing")).Level);
     }
 
     // --- 初回の生成の許可(AllowCertificateBootstrap) ---
@@ -518,7 +518,7 @@ public sealed class CertificateServiceTest : IDisposable
     {
         var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
 
-        var exception = Assert.Throws<InvalidOperationException>(() => service.GetStartupCertificates());
+        var exception = Assert.Throws<InvalidOperationException>(service.GetStartupCertificates);
 
         Assert.Contains("AllowCertificateBootstrap", exception.Message);
         Assert.Contains("マウント漏れ", exception.Message);
@@ -534,7 +534,7 @@ public sealed class CertificateServiceTest : IDisposable
 
         var service = new CertificateService(_repository, _time, Settings(allowBootstrap: false), _logger);
 
-        Assert.Throws<InvalidOperationException>(() => service.GetStartupCertificates());
+        Assert.Throws<InvalidOperationException>(service.GetStartupCertificates);
         Assert.Equal(1, PfxCount("server-signing"));
         Assert.True(File.Exists(signing.Path));
     }

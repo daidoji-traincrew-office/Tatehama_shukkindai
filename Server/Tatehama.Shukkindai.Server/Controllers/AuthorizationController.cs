@@ -114,9 +114,9 @@ public class AuthorizationController(
                 result.Properties!.Items.TryGetValue(OpenIddictClientAspNetCoreConstants.Properties.Error,
                     out var discordError);
                 var failureIdentity = new ClaimsIdentity("ExternalLoginFailed");
-                failureIdentity.AddClaim(new Claim(ExternalLoginFailure.ClaimType,
+                failureIdentity.AddClaim(new(ExternalLoginFailure.ClaimType,
                     ExternalLoginFailure.MapError(discordError)));
-                return await SignInAndRedirect(new ClaimsPrincipal(failureIdentity), returnUri);
+                return await SignInAndRedirect(new(failureIdentity), returnUri);
             }
 
             // 戻り先が分からない(state が無い・壊れている・期限切れなど)場合は、サーバー側でエラーを表示する
@@ -136,11 +136,11 @@ public class AuthorizationController(
         }
 
         var identity = new ClaimsIdentity("ExternalLogin");
-        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, userId));
+        identity.AddClaim(new(ClaimTypes.NameIdentifier, userId));
 
         // Discord のトークンなどを Cookie に持ち回らない。戻り先(元の authorize の URL)だけ使う
         var successReturnUri = result.Properties.RedirectUri;
-        return await SignInAndRedirect(new ClaimsPrincipal(identity),
+        return await SignInAndRedirect(new(identity),
             !string.IsNullOrEmpty(successReturnUri) && Url.IsLocalUrl(successReturnUri) ? successReturnUri : "/");
     }
 
@@ -161,7 +161,7 @@ public class AuthorizationController(
 
     private static IResult Fail(string error, string description) => Results.Forbid(
         authenticationSchemes: [OpenIddictServerAspNetCoreDefaults.AuthenticationScheme],
-        properties: new AuthenticationProperties(new Dictionary<string, string?>
+        properties: new(new Dictionary<string, string?>
         {
             [OpenIddictServerAspNetCoreConstants.Properties.Error] = error,
             [OpenIddictServerAspNetCoreConstants.Properties.ErrorDescription] = description,

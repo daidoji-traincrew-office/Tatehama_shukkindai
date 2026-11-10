@@ -14,7 +14,7 @@ public sealed class CertificateRepositoryTest : IDisposable
 
     public CertificateRepositoryTest()
     {
-        _repository = new CertificateRepository(_directory.Path);
+        _repository = new(_directory.Path);
     }
 
     public void Dispose() => _directory.Dispose();
@@ -186,7 +186,7 @@ public sealed class CertificateRepositoryTest : IDisposable
         File.WriteAllBytes(Path.Combine(PublicDirectory, "stray.cer"), [1, 2, 3]);
 
         // 渡された中身が違っても、既にある .cer は書き直さない
-        var changes = _repository.SyncPublic([keep], new Dictionary<string, byte[]> { [gone.Thumbprint] = [9, 9, 9] });
+        var changes = _repository.SyncPublic([keep], new Dictionary<string, byte[]> { [gone.Thumbprint] = "different"u8.ToArray() });
 
         Assert.Equal(["-stray.cer"], changes);
         Assert.Equal(before, File.ReadAllBytes(goneCer));
@@ -218,7 +218,7 @@ public sealed class CertificateRepositoryTest : IDisposable
     {
         var info = _repository.Create(CertificatePurpose.ServerSigning, Now.AddDays(-10), Now.AddDays(100));
 
-        _repository.SyncPublic([info], new Dictionary<string, byte[]> { [info.Thumbprint] = [9, 9, 9] });
+        _repository.SyncPublic([info], new Dictionary<string, byte[]> { [info.Thumbprint] = "different"u8.ToArray() });
 
         using var cer = X509CertificateLoader.LoadCertificateFromFile(
             Path.Combine(PublicDirectory, $"server-signing-{info.Thumbprint}.cer"));
@@ -374,6 +374,8 @@ public sealed class CertificateRepositoryTest : IDisposable
         using var stop = new CancellationTokenSource();
         var watcher = Task.Run(() =>
         {
+            // stop を破棄するのは watcher を待ったあと
+            // ReSharper disable once AccessToDisposedClosure
             while (!stop.IsCancellationRequested)
             {
                 if (!File.Exists(cerPath))
@@ -389,7 +391,7 @@ public sealed class CertificateRepositoryTest : IDisposable
             _repository.SyncPublic([info], NoRetained);
         }
 
-        stop.Cancel();
+        await stop.CancelAsync();
         await watcher;
         Assert.Equal(0, missing);
     }

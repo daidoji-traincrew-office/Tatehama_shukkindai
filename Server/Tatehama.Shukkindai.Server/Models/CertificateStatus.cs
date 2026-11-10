@@ -26,16 +26,8 @@ public sealed record CertificateStatus(
 }
 
 /// <summary>起動時に OpenIddict へ登録する証明書(秘密鍵つき)。プロセスの間、保持する。</summary>
-public sealed class CertificateSet
+public sealed class CertificateSet(Dictionary<CertificatePurpose, IReadOnlyList<X509Certificate2>> byPurpose)
 {
-    private readonly Dictionary<CertificatePurpose, IReadOnlyList<X509Certificate2>> _byPurpose;
-
-    public CertificateSet(
-        Dictionary<CertificatePurpose, IReadOnlyList<X509Certificate2>> byPurpose)
-    {
-        _byPurpose = byPurpose;
-    }
-
     public IReadOnlyList<X509Certificate2> Get(CertificatePurpose purpose) =>
-        _byPurpose.TryGetValue(purpose, out var list) ? list : [];
+        byPurpose.TryGetValue(purpose, out var list) ? list : [];
 }

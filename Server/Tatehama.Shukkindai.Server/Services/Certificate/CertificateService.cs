@@ -43,7 +43,7 @@ public sealed class CertificateService(
     /// <summary>時計が過去に戻った/大きくずれたとみなす幅(非署名の既存の証明書の NotBefore が、今よりこれ以上未来)。</summary>
     private static readonly TimeSpan ClockSanityMargin = TimeSpan.FromDays(1);
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private CertificateSet? _startup;
     private DateTimeOffset _processStart;
     private readonly Dictionary<CertificatePurpose, HashSet<string>> _inUse = new();
@@ -164,7 +164,7 @@ public sealed class CertificateService(
 
         // --- 5. 状態を保存して返す(返した証明書が OpenIddict に登録される) ---
         _status = BuildStatus(all, outcome.Success ? now : null);
-        return new CertificateSet(loaded);
+        return new(loaded);
     }
 
     /// <summary>
@@ -305,7 +305,7 @@ public sealed class CertificateService(
         {
             // ロックが取れない、cert/ を作れない、など
             CertificateLog.CertificateRotationFailed(logger, e, "all");
-            return new RotationOutcome(false, e, true);
+            return new(false, e, true);
         }
     }
 
@@ -384,9 +384,9 @@ public sealed class CertificateService(
         Dictionary<CertificatePurpose, IReadOnlyList<CertificateInfo>> all, DateTimeOffset? lastSuccess)
     {
         var purposes = Purposes.Select(p => new PurposeStatus(p, all[p],
-            _inUse.TryGetValue(p, out var set) ? set : new HashSet<string>(),
-            _inUseActive.TryGetValue(p, out var active) ? active : null)).ToList();
-        return new CertificateStatus(purposes, lastSuccess);
+            _inUse.TryGetValue(p, out var set) ? set : new(),
+            _inUseActive.GetValueOrDefault(p))).ToList();
+        return new(purposes, lastSuccess);
     }
 
     /// <summary>

@@ -13,6 +13,7 @@ public interface ITokenService
         ulong discordUserId, IEnumerable<string> requestedScopes, string remoteIpAddress,
         CancellationToken cancellationToken);
 
+    /// <param name="refreshTokenPrincipal">OpenIddict が検証した refresh token の principal。<c>sub</c> から Discord のユーザーを引く。</param>
     /// <param name="cancellationToken">今は使っていない(メンバー確認が同期のキャッシュ参照のため)。Discord への問い合わせや DB が入ったときに署名を変えないよう、API として残す。</param>
     Task<TokenPrincipalResult> CreatePrincipalForRefresh(
         ClaimsPrincipal refreshTokenPrincipal, CancellationToken cancellationToken);
@@ -45,8 +46,8 @@ public sealed class TokenService(
                        ?? throw new InvalidOperationException("Member の結果には Username が必要です。");
         var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType,
             Claims.Name, Claims.Role);
-        identity.AddClaim(new Claim(Claims.Subject, discordUserId.ToString()));
-        identity.AddClaim(new Claim(Claims.Name, username));
+        identity.AddClaim(new(Claims.Subject, discordUserId.ToString()));
+        identity.AddClaim(new(Claims.Name, username));
 
         // offline_access 以外の scope は通さない
         // (大文字小文字を無視して比べ、正規の表記で返す)
@@ -58,7 +59,7 @@ public sealed class TokenService(
             "User logged in. RemoteIpAddress: {RemoteIpAddress}, DiscordMemberName: {DiscordMemberName}, UserId: {UserId}",
             remoteIpAddress, username, discordUserId);
 
-        return new TokenPrincipalResult.Success(new ClaimsPrincipal(identity));
+        return new TokenPrincipalResult.Success(new(identity));
     }
 
     public async Task<TokenPrincipalResult> CreatePrincipalForRefresh(
@@ -88,6 +89,6 @@ public sealed class TokenService(
                                        ?? throw new InvalidOperationException("Member の結果には Username が必要です。"));
         TokenDestinations.Apply(identity);
 
-        return new TokenPrincipalResult.Success(new ClaimsPrincipal(identity));
+        return new TokenPrincipalResult.Success(new(identity));
     }
 }

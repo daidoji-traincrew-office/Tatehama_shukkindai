@@ -56,19 +56,19 @@ public static class CertificateRotationPolicy
     //   Client 用:   E-60 日に次の鍵を作る(すぐ有効)。E+1 日以降に削除。
     public static CertificateRule RuleFor(CertificatePurpose purpose) => purpose switch
     {
-        CertificatePurpose.ServerSigning => new CertificateRule("server-signing",
+        CertificatePurpose.ServerSigning => new("server-signing",
             "CN=Tatehama Shukkindai Server Signing Certificate", X509KeyUsageFlags.DigitalSignature,
             Lifetime, RenewBefore: TimeSpan.FromDays(150), DeleteAfterExpiry: TimeSpan.FromDays(7),
             DeferredActivation: true, Publish: true),
-        CertificatePurpose.ServerEncryption => new CertificateRule("server-encryption",
+        CertificatePurpose.ServerEncryption => new("server-encryption",
             "CN=Tatehama Shukkindai Server Encryption Certificate", X509KeyUsageFlags.KeyEncipherment,
             Lifetime, RenewBefore: TimeSpan.FromDays(60), DeleteAfterExpiry: TimeSpan.FromDays(14),
             DeferredActivation: false, Publish: false),
-        CertificatePurpose.ClientSigning => new CertificateRule("client-signing",
+        CertificatePurpose.ClientSigning => new("client-signing",
             "CN=Tatehama Shukkindai Client Signing Certificate", X509KeyUsageFlags.DigitalSignature,
             Lifetime, RenewBefore: TimeSpan.FromDays(60), DeleteAfterExpiry: TimeSpan.FromDays(1),
             DeferredActivation: false, Publish: false),
-        CertificatePurpose.ClientEncryption => new CertificateRule("client-encryption",
+        CertificatePurpose.ClientEncryption => new("client-encryption",
             "CN=Tatehama Shukkindai Client Encryption Certificate", X509KeyUsageFlags.KeyEncipherment,
             Lifetime, RenewBefore: TimeSpan.FromDays(60), DeleteAfterExpiry: TimeSpan.FromDays(1),
             DeferredActivation: false, Publish: false),
@@ -134,7 +134,7 @@ public static class CertificateRotationPolicy
         // cert/ のマウント漏れで、黙って新しい署名鍵を作らないため(呼び出し元は起動の事前確認でも止める)。
         if (certificates.Count == 0 && !allowBootstrap)
         {
-            return new RotationPlan(null, [], BootstrapDenied: true);
+            return new(null, [], BootstrapDenied: true);
         }
 
         // --- 2. 作るか(次の鍵が必要な時期か) ---
@@ -146,26 +146,17 @@ public static class CertificateRotationPolicy
         //   b. プロセス起動 + 保持期間 を過ぎていない(長く再起動しなかったあとの起動で、直前まで使った鍵をすぐ消さない)
         //   c. このプロセスが使っている(再起動まで残す)
         var survivors = certificates.Where(c => c.NotAfter > now).ToList();
-        var delete = new List<CertificateInfo>();
-        foreach (var certificate in certificates)
-        {
-            if (certificate.NotAfter + rule.DeleteAfterExpiry >= now || processStart + rule.DeleteAfterExpiry >= now ||
-                inUseThumbprints.Contains(certificate.Thumbprint))
-            {
-                continue;
-            }
+        // 消した結果、期限内の証明書が 1 つも残らない状態にはしない(空になると、初回扱いで勝手に作り直してしまうため)。
+        // 作る予定(create)があれば、新しい鍵が残るので消してよい
+        var keepAll = create is null && survivors.Count == 0;
+        var delete = certificates
+            .Where(c => !keepAll &&
+                        c.NotAfter + rule.DeleteAfterExpiry < now &&
+                        processStart + rule.DeleteAfterExpiry < now &&
+                        !inUseThumbprints.Contains(c.Thumbprint))
+            .ToList();
 
-            // 消した結果、期限内の証明書が 1 つも残らない状態にはしない(空になると、初回扱いで勝手に作り直してしまうため)。
-            // 作る予定(create)があれば、新しい鍵が残るので消してよい
-            if (create is null && survivors.Count == 0)
-            {
-                continue;
-            }
-
-            delete.Add(certificate);
-        }
-
-        return new RotationPlan(create, delete);
+        return new(create, delete);
     }
 
     private static CertificateToCreate? DecideCreate(
@@ -176,7 +167,7 @@ public static class CertificateRotationPolicy
         {
             // 初回。署名も、すぐ使える証明書を作って起動する
             var notBefore = now - ClockSkew;
-            return new CertificateToCreate(notBefore, notBefore + rule.Lifetime, Initial: true, ShortNotice: false);
+            return new(notBefore, notBefore + rule.Lifetime, Initial: true, ShortNotice: false);
         }
 
         // --- 2. まだ次の鍵を作る時期ではない ---
@@ -192,7 +183,7 @@ public static class CertificateRotationPolicy
         if (!rule.DeferredActivation)
         {
             var notBefore = now - ClockSkew;
-            return new CertificateToCreate(notBefore, notBefore + rule.Lifetime, Initial: false, ShortNotice: false);
+            return new(notBefore, notBefore + rule.Lifetime, Initial: false, ShortNotice: false);
         }
 
         // --- 4. 署名の次の鍵: 公開だけ先にして、有効になるのは未来にする ---
@@ -219,6 +210,6 @@ public static class CertificateRotationPolicy
             chosen = now - ClockSkew;
         }
 
-        return new CertificateToCreate(chosen, chosen + rule.Lifetime, Initial: false, ShortNotice: shortNotice);
+        return new(chosen, chosen + rule.Lifetime, Initial: false, ShortNotice: shortNotice);
     }
 }

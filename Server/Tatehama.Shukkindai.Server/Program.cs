@@ -8,11 +8,8 @@ using Microsoft.Extensions.Options;
 using OpenIddict.Client;
 using OpenIddict.Server;
 using OpenTelemetry;
-using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
-using OpenIddict.Abstractions;
-using static OpenIddict.Abstractions.OpenIddictConstants;
 using Tatehama.Shukkindai.Server.Authentication;
 using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Data;
@@ -22,6 +19,7 @@ using Tatehama.Shukkindai.Server.Repositories.Database;
 using Tatehama.Shukkindai.Server.Repositories.Discord;
 using Tatehama.Shukkindai.Server.Services;
 using Tatehama.Shukkindai.Server.Services.Certificate;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Tatehama.Shukkindai.Server;
 
@@ -33,9 +31,9 @@ public class Program
         var isDevelopment = builder.Environment.IsDevelopment();
 
         // 設定が不正なら、ここで例外にして起動を止める
-        var authenticationSettings = BindAndValidate<AuthenticationSettings>(
+        var authenticationSettings = BindAndValidate(
             builder, AuthenticationSettings.SectionName, new AuthenticationSettingsValidator());
-        var discordSettings = BindAndValidate<DiscordSettings>(
+        var discordSettings = BindAndValidate(
             builder, DiscordSettings.SectionName, new DiscordSettingsValidator());
 
         ConfigureServices(builder, authenticationSettings, discordSettings, isDevelopment);

@@ -19,6 +19,8 @@ public sealed class CertificateRotationHostedService(
     // 注入するのは、メトリクス(ObservableGauge)を登録するため。使うのはコンストラクターだけ
     CertificateMetrics metrics) : BackgroundService
 {
+    // 読まないが、引数を捨てると CS9113(未使用の引数)になるため、フィールドに持つ
+    // ReSharper disable once UnusedMember.Local
     private readonly CertificateMetrics _metrics = metrics;
 
     public static readonly TimeSpan Interval = TimeSpan.FromHours(24);

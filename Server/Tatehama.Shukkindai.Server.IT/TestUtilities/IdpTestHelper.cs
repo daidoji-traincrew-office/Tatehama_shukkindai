@@ -17,9 +17,9 @@ public static class IdpTestHelper
     /// <summary>Cookie を保持し、リダイレクトを自動では辿らない HttpClient(ログイン途中の Cookie を確かめるため)。</summary>
     public static HttpClient CreateIdpClient<TEntryPoint>(this WebApplicationFactory<TEntryPoint> factory)
         where TEntryPoint : class =>
-        factory.CreateClient(new WebApplicationFactoryClientOptions
+        factory.CreateClient(new()
         {
-            BaseAddress = new Uri("https://localhost/"),
+            BaseAddress = new("https://localhost/"),
             AllowAutoRedirect = false,
             HandleCookies = true,
         });
@@ -84,7 +84,7 @@ public static class IdpTestHelper
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
         using var json = JsonDocument.Parse(body);
         var root = json.RootElement;
-        return new TokenResponse(
+        return new(
             root.GetProperty("access_token").GetString()!,
             root.TryGetProperty("refresh_token", out var r) ? r.GetString() : null,
             root.GetProperty("expires_in").GetInt32(),
@@ -100,11 +100,11 @@ public static class IdpTestHelper
         var code = query["code"];
         Assert.False(string.IsNullOrEmpty(code), "authorization code が無い: " + location);
 
-        var response = await PostToken(client, new Dictionary<string, string>
+        var response = await PostToken(client, new()
         {
             ["grant_type"] = "authorization_code",
             ["client_id"] = ClientId,
-            ["code"] = code!,
+            ["code"] = code,
             ["redirect_uri"] = RedirectUri,
             ["code_verifier"] = verifier,
         });
@@ -112,7 +112,7 @@ public static class IdpTestHelper
     }
 
     public static Task<HttpResponseMessage> Refresh(HttpClient client, string refreshToken) =>
-        PostToken(client, new Dictionary<string, string>
+        PostToken(client, new()
         {
             ["grant_type"] = "refresh_token",
             ["client_id"] = ClientId,

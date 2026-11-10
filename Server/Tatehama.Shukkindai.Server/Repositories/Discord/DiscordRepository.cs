@@ -1,5 +1,5 @@
-using global::Discord;
-using global::Discord.WebSocket;
+using Discord;
+using Discord.WebSocket;
 using Microsoft.Extensions.Options;
 using Tatehama.Shukkindai.Server.Configuration;
 using Tatehama.Shukkindai.Server.Models;
@@ -16,7 +16,7 @@ public sealed class DiscordRepository : IDiscordRepository
 
     private static readonly TimeSpan StartupPollInterval = TimeSpan.FromMilliseconds(200);
 
-    private readonly DiscordSocketClient _client = new(new DiscordSocketConfig
+    private readonly DiscordSocketClient _client = new(new()
     {
         GatewayIntents = GatewayIntents.Guilds | GatewayIntents.GuildMembers,
         // GuildPresences の Intent を使わないので、GUILD_CREATE には一部のメンバーしか入らない

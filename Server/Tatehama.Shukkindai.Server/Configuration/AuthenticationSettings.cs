@@ -45,6 +45,8 @@ public sealed class AuthenticationSettingsValidator : IValidateOptions<Authentic
             errors.Add("Authentication:Issuer は末尾が '/' でなければなりません。");
         }
 
+        // 型は null にならないが、設定の bind は null を入れうるので確かめる
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (options.ClientRedirectPorts is null || options.ClientRedirectPorts.Length == 0)
         {
             errors.Add("Authentication:ClientRedirectPorts は1つ以上必要です。");
