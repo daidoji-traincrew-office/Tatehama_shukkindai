@@ -1,12 +1,15 @@
 # ビルドコンテキストはリポジトリのルート: docker build -f Server/Dockerfile .
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# build ステージはビルドするマシンのアーキテクチャで動かし、TARGETARCH 向けにクロスビルドする
+# (CI の arm64 ビルドで、dotnet を QEMU の上で動かさないため)
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 COPY global.json Directory.Build.props ./
 COPY Server/Tatehama.Shukkindai.Server/Tatehama.Shukkindai.Server.csproj Server/Tatehama.Shukkindai.Server/
-RUN dotnet restore Server/Tatehama.Shukkindai.Server/Tatehama.Shukkindai.Server.csproj
+RUN dotnet restore Server/Tatehama.Shukkindai.Server/Tatehama.Shukkindai.Server.csproj -a $TARGETARCH
 COPY Server/Tatehama.Shukkindai.Server/ Server/Tatehama.Shukkindai.Server/
 COPY Common/ Common/
-RUN dotnet publish Server/Tatehama.Shukkindai.Server -c Release --no-restore -o /app
+RUN dotnet publish Server/Tatehama.Shukkindai.Server -c Release --no-restore -a $TARGETARCH -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

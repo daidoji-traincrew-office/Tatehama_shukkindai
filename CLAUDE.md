@@ -6,12 +6,17 @@
 ```
 dotnet build Tatehama_shukkindai.slnx
 dotnet test --project Server/Tatehama.Shukkindai.Server.UT
-docker compose -f Server/compose.yml up -d     # IT の前に DB(ポート 5434)を起動
+docker compose -f Server/compose.yml up -d --wait   # IT の前に DB(ポート 5434)を起動
 dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 ```
 - `dotnet test` は `--project <path>` の形で指定する(global.json で Microsoft.Testing.Platform を使うため、位置引数はエラーになる)。
 - TreatWarningsAsErrors を有効にしている。警告ゼロを保つこと。
 - ローカルの restore で `NETSDK1226`(prune package data が無い)が出たら、`AllowMissingPrunePackageData=true` を環境変数かプロパティで付ける(SDK に ASP.NET Core の targeting pack が無い環境の回避策。CI では不要)。
+
+### CI(GitHub Actions)
+Client も置くので、Server 用の workflow とイメージには `server` を付けている。
+- `serverUnitTest.yml` / `serverIntegrationTest.yml`: push と PR で UT / IT を走らせる(IT は `Server/compose.yml` の DB を使う)。open な PR があるブランチの push はスキップし、PR 側で走る。
+- `serverBuild.yml`: push ごとに `Server/Dockerfile` をビルドし、`ghcr.io/daidoji-traincrew-office/tatehama_shukkindai_server:<ブランチ名の / を _ に>` へ amd64/arm64 で push する(dev は今もホストでビルドしている)。
 
 ## コードスタイル(Rider 検査)
 C# は JetBrains Rider(ReSharper)の検査で指摘が出ない形で書く。特に次の点。

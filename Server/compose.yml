@@ -10,6 +10,13 @@ services:
       # bind mount ではなく名前付きボリュームを使う(権限問題を避ける)
       - db-data:/var/lib/postgresql/data
       - ./Database/schema.sql:/docker-entrypoint-initdb.d/00_schema.sql:ro
+    # `up -d --wait` で、schema.sql の流し込みが終わるまで待てるようにする。
+    # initdb の間は一時サーバーが unix socket だけで動くので、TCP で確かめる
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 
 volumes:
   db-data:
