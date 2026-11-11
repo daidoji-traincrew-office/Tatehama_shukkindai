@@ -6,8 +6,10 @@
 
 | 環境 | issuer(末尾の `/` まで完全一致) |
 |---|---|
-| prod | `https://shukkindai.example.invalid/` |
-| dev | `https://shukkindai-dev.example.invalid/` |
+| prod | `https://<prod のホスト>/` |
+| dev | `https://<dev のホスト>/` |
+
+実際のホスト名はリポジトリに置かない(このリポジトリは public)。運用者に確認すること。
 
 - discovery: `{issuer}.well-known/openid-configuration`
 - JWKS: `{issuer}.well-known/jwks`(discovery の `jwks_uri` を参照)
@@ -64,7 +66,7 @@ IReadOnlyList<SecurityKey> LoadKeys(string directory) =>
 
 var parameters = new TokenValidationParameters
 {
-    ValidIssuer = "https://shukkindai.example.invalid/",
+    ValidIssuer = "https://<prod のホスト>/",
     IssuerSigningKeys = LoadKeys("/idp-public"),   // 複数の鍵。header の kid が一致する鍵で検証される
     ValidateIssuer = true,
     ValidateAudience = false,           // aud は付かない

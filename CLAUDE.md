@@ -70,7 +70,7 @@ dotnet user-secrets set Discord:ClientSecret <値>
 dotnet user-secrets set Discord:BotToken <値>
 dotnet user-secrets set Discord:GuildId <ギルドID>
 ```
-DB は `docker compose -f Server/compose.yml up -d`。Development の issuer は `https://shukkindai-dev.example.invalid/`。
+DB は `docker compose -f Server/compose.yml up -d`。Development の issuer は `https://localhost:7180/`(ローカルの起動先)。
 
 ## 将来の API を足すとき
 - 既定の認証スキームは Cookie(ログイン途中用)なので、`[Authorize]` だけだと Cookie で判定される。出勤台 API は OpenIddict Validation のスキーム(`OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme`)を明示して認可すること。
@@ -101,3 +101,4 @@ atlas migrate diff <名前> --env local    # schema.sql を変えたら diff を
 
 ## 秘密情報
 Discord の ClientSecret / BotToken はリポジトリに置かない。User Secrets(`dotnet user-secrets`)か環境変数(`Discord__ClientSecret` など)で渡す。appsettings*.json には書かない。証明書(`cert/`。pfx は秘密鍵を含む)もコミットしない。
+prod・dev のホスト名(issuer の URL)もリポジトリに置かない(public のため)。Server は環境変数 `Authentication__Issuer` で渡す(`appsettings.json` に既定値は無い)。ドキュメントでは `<prod のホスト>` のように書く。
