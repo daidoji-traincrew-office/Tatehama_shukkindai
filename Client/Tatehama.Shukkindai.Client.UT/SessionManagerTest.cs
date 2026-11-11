@@ -11,7 +11,7 @@ public sealed class SessionManagerTest : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
     private readonly FakeTokenProtector _protector = new();
-    private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 12, 0, 0, 0, TimeSpan.Zero));
+    private readonly FakeTimeProvider _time = new(new(2026, 11, 12, 0, 0, 0, TimeSpan.Zero));
     private readonly Mock<IShukkindaiAuthClient> _auth = new();
     private readonly RefreshTokenStore _refreshStore;
     private readonly AccessTokenFileWriter _accessWriter;
@@ -22,10 +22,10 @@ public sealed class SessionManagerTest : IDisposable
     public SessionManagerTest()
     {
         var accessPath = Path.Combine(_directory, "access-token.bin");
-        _refreshStore = new RefreshTokenStore(_protector, Path.Combine(_directory, "refresh-token.bin"));
-        _accessWriter = new AccessTokenFileWriter(_protector, accessPath);
-        _accessReader = new AccessTokenFileReader(_protector, accessPath, _time);
-        _sut = new SessionManager(
+        _refreshStore = new(_protector, Path.Combine(_directory, "refresh-token.bin"));
+        _accessWriter = new(_protector, accessPath);
+        _accessReader = new(_protector, accessPath, _time);
+        _sut = new(
             _auth.Object,
             _refreshStore,
             _accessWriter,
@@ -47,12 +47,12 @@ public sealed class SessionManagerTest : IDisposable
     private AuthResult.Succeeded Success(string refreshToken, TimeSpan? lifetime = null)
     {
         var expiresAt = _time.GetUtcNow().Add(lifetime ?? TimeSpan.FromHours(1));
-        return new AuthResult.Succeeded(TestJwt.Create("900000000000740692", "alice", expiresAt), refreshToken, expiresAt);
+        return new(TestJwt.Create("900000000000740692", "alice", expiresAt), refreshToken, expiresAt);
     }
 
     private static AuthResult.Failed Failure(AuthFailureKind kind)
     {
-        return new AuthResult.Failed(kind);
+        return new(kind);
     }
 
     private static async Task WaitUntil(Func<bool> condition)
@@ -98,7 +98,7 @@ public sealed class SessionManagerTest : IDisposable
         using var sut = new SessionManager(
             _auth.Object,
             _refreshStore,
-            new AccessTokenFileWriter(_protector, blockedPath),
+            new(_protector, blockedPath),
             Options.Create(new ShukkindaiClientOptions()),
             _time,
             NullLogger<SessionManager>.Instance);
@@ -255,7 +255,7 @@ public sealed class SessionManagerTest : IDisposable
 
         await _sut.SignIn(CancellationToken.None);
 
-        Assert.Equal(new SessionStatus(SessionState.SignedOut, Failure: AuthFailureKind.AccessDenied), _sut.Status);
+        Assert.Equal(new(SessionState.SignedOut, Failure: AuthFailureKind.AccessDenied), _sut.Status);
         Assert.Null(_refreshStore.Load());
     }
 

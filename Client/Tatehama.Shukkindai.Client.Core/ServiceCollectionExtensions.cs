@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using OpenIddict.Client;
 using Tatehama.Shukkindai.TokenFile;
 
 namespace Tatehama.Shukkindai.Client.Core;
@@ -36,11 +35,11 @@ public static class ServiceCollectionExtensions
                     .SetAllowedEmbeddedWebServerPorts(settings.RedirectPort));
                 builder.UseSystemNetHttp();
                 // openid は付けない(サーバーの discovery に openid が無いので OpenIddict も付けない。id_token は発行されない)
-                builder.AddRegistration(new OpenIddictClientRegistration
+                builder.AddRegistration(new()
                 {
                     Issuer = issuer,
                     ClientId = ShukkindaiClientOptions.ClientId,
-                    RedirectUri = new Uri($"http://localhost:{settings.RedirectPort}/"),
+                    RedirectUri = new($"http://localhost:{settings.RedirectPort}/"),
                     Scopes = { "offline_access" },
                 });
             });

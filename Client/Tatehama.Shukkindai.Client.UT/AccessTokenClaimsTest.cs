@@ -11,7 +11,7 @@ public sealed class AccessTokenClaimsTest
 
         var claims = AccessTokenClaims.Parse(TestJwt.Create("900000000000740692", "alice", exp));
 
-        Assert.Equal(new AccessTokenClaims("900000000000740692", "alice", exp), claims);
+        Assert.Equal(new("900000000000740692", "alice", exp), claims);
     }
 
     [Fact]

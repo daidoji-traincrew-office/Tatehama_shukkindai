@@ -57,7 +57,7 @@ public sealed class SessionManager(
             }
 
             _refreshToken = stored;
-            SetStatus(new SessionStatus(SessionState.SigningIn));
+            SetStatus(new(SessionState.SigningIn));
             await RefreshLocked(cancellationToken);
         }
         finally
@@ -72,7 +72,7 @@ public sealed class SessionManager(
         try
         {
             var previous = Status;
-            SetStatus(new SessionStatus(SessionState.SigningIn));
+            SetStatus(new(SessionState.SigningIn));
             AuthResult result;
             try
             {
@@ -112,7 +112,7 @@ public sealed class SessionManager(
             }
 
             ClearLocked();
-            SetStatus(new SessionStatus(SessionState.SignedOut));
+            SetStatus(new(SessionState.SignedOut));
         }
         finally
         {
@@ -155,12 +155,12 @@ public sealed class SessionManager(
                 break;
             case AuthResult.Failed { Kind: AuthFailureKind.InvalidGrant or AuthFailureKind.AccessDenied } failed:
                 ClearLocked();
-                SetStatus(new SessionStatus(SessionState.SignedOut, Failure: failed.Kind));
+                SetStatus(new(SessionState.SignedOut, Failure: failed.Kind));
                 break;
             case AuthResult.Failed failed:
                 // 一時的な失敗。トークンファイルは消さず、指数バックオフで再試行する
                 logger.LogWarning("トークンの取得に失敗した({Kind})。再試行する。", failed.Kind);
-                SetStatus(new SessionStatus(SessionState.Error, Status.User, failed.Kind));
+                SetStatus(new(SessionState.Error, Status.User, failed.Kind));
                 if (_refreshToken is not null)
                 {
                     ScheduleRetry();
@@ -182,13 +182,13 @@ public sealed class SessionManager(
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException)
         {
             logger.LogError(e, "トークンファイルの保存に失敗した。再試行する。");
-            SetStatus(new SessionStatus(SessionState.Error, Status.User, AuthFailureKind.Transient));
+            SetStatus(new(SessionState.Error, Status.User, AuthFailureKind.Transient));
             ScheduleRetry();
             return;
         }
 
         _failureCount = 0;
-        SetStatus(new SessionStatus(SessionState.SignedIn, AccessTokenClaims.Parse(success.AccessToken)));
+        SetStatus(new(SessionState.SignedIn, AccessTokenClaims.Parse(success.AccessToken)));
         var delay = success.ExpiresAt - options.Value.RefreshBeforeExpiry - timeProvider.GetUtcNow();
         Schedule(delay < MinimumRefreshDelay ? MinimumRefreshDelay : delay);
     }
@@ -204,8 +204,11 @@ public sealed class SessionManager(
     private void Schedule(TimeSpan delay)
     {
         _timer?.Dispose();
-        _timer = timeProvider.CreateTimer(_ => _ = RunScheduledRefresh(), null, delay, Timeout.InfiniteTimeSpan);
+        _timer = timeProvider.CreateTimer(OnTimer, null, delay, Timeout.InfiniteTimeSpan);
     }
+
+    // タイマーのコールバック。例外は RunScheduledRefresh の中で受け止める
+    private void OnTimer(object? state) => _ = RunScheduledRefresh();
 
     private async Task RunScheduledRefresh()
     {

@@ -8,7 +8,7 @@ public sealed class TokenFileTest : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
     private readonly FakeTokenProtector _protector = new();
-    private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 12, 0, 0, 0, TimeSpan.Zero));
+    private readonly FakeTimeProvider _time = new(new(2026, 11, 12, 0, 0, 0, TimeSpan.Zero));
     private readonly string _path;
 
     public TokenFileTest()
@@ -26,7 +26,7 @@ public sealed class TokenFileTest : IDisposable
 
     private AccessTokenFileReader Reader()
     {
-        return new AccessTokenFileReader(_protector, _path, _time);
+        return new(_protector, _path, _time);
     }
 
     private void WriteRaw(byte[] plain)
@@ -112,7 +112,7 @@ public sealed class TokenFileTest : IDisposable
     [Fact]
     public void Read_UnknownVersion_ReturnsUnknownVersion()
     {
-        WriteRaw(Encoding.UTF8.GetBytes("{\"version\":2,\"access_token\":\"t\",\"expires_at\":9999999999}"));
+        WriteRaw("{\"version\":2,\"access_token\":\"t\",\"expires_at\":9999999999}"u8.ToArray());
 
         var result = Reader().Read();
 
@@ -122,7 +122,7 @@ public sealed class TokenFileTest : IDisposable
     [Fact]
     public void Read_BrokenJson_ReturnsUnreadable()
     {
-        WriteRaw(Encoding.UTF8.GetBytes("not json"));
+        WriteRaw("not json"u8.ToArray());
 
         Assert.IsType<AccessTokenReadResult.Unreadable>(Reader().Read());
     }
@@ -130,7 +130,7 @@ public sealed class TokenFileTest : IDisposable
     [Fact]
     public void Read_EmptyAccessToken_ReturnsUnreadable()
     {
-        WriteRaw(Encoding.UTF8.GetBytes("{\"version\":1,\"access_token\":\"\",\"expires_at\":9999999999}"));
+        WriteRaw("{\"version\":1,\"access_token\":\"\",\"expires_at\":9999999999}"u8.ToArray());
 
         Assert.IsType<AccessTokenReadResult.Unreadable>(Reader().Read());
     }

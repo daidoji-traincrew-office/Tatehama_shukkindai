@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 
 namespace Tatehama.Shukkindai.Client.Core;
@@ -28,7 +27,7 @@ public sealed record AccessTokenClaims(string Subject, string? Name, DateTimeOff
             var name = root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
                 ? n.GetString()
                 : null;
-            return new AccessTokenClaims(sub.GetString()!, name, DateTimeOffset.FromUnixTimeSeconds(expSeconds));
+            return new(sub.GetString()!, name, DateTimeOffset.FromUnixTimeSeconds(expSeconds));
         }
         catch (Exception e) when (e is JsonException or FormatException or ArgumentOutOfRangeException)
         {

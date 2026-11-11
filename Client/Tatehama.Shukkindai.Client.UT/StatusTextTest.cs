@@ -9,7 +9,7 @@ public class StatusTextTest
     [Fact]
     public void Format_SignedOut_ReturnsNotSignedIn()
     {
-        var text = StatusText.Format(new SessionStatus(SessionState.SignedOut), Jst);
+        var text = StatusText.Format(new(SessionState.SignedOut), Jst);
 
         Assert.Equal("未ログイン", text);
     }
@@ -17,9 +17,9 @@ public class StatusTextTest
     [Fact]
     public void Format_SignedIn_ShowsUserAndLocalExpiry()
     {
-        var user = new AccessTokenClaims("123", "taro", new DateTimeOffset(2026, 1, 1, 3, 30, 0, TimeSpan.Zero));
+        var user = new AccessTokenClaims("123", "taro", new(2026, 1, 1, 3, 30, 0, TimeSpan.Zero));
 
-        var text = StatusText.Format(new SessionStatus(SessionState.SignedIn, user), Jst);
+        var text = StatusText.Format(new(SessionState.SignedIn, user), Jst);
 
         Assert.Contains("taro(123)", text);
         Assert.Contains("有効期限 12:30", text);
@@ -28,7 +28,7 @@ public class StatusTextTest
     [Fact]
     public void Format_SigningIn_ShowsUpdating()
     {
-        var text = StatusText.Format(new SessionStatus(SessionState.SigningIn), Jst);
+        var text = StatusText.Format(new(SessionState.SigningIn), Jst);
 
         Assert.Equal("更新中…", text);
     }
@@ -39,7 +39,7 @@ public class StatusTextTest
     [InlineData(AuthFailureKind.Transient, "再試行しています")]
     public void Format_Error_ShowsMessageForKind(AuthFailureKind kind, string expected)
     {
-        var text = StatusText.Format(new SessionStatus(SessionState.Error, Failure: kind), Jst);
+        var text = StatusText.Format(new(SessionState.Error, Failure: kind), Jst);
 
         Assert.Contains(expected, text);
     }
@@ -47,7 +47,7 @@ public class StatusTextTest
     [Fact]
     public void Format_SignedOutAfterAccessDenied_ShowsReason()
     {
-        var text = StatusText.Format(new SessionStatus(SessionState.SignedOut, Failure: AuthFailureKind.AccessDenied), Jst);
+        var text = StatusText.Format(new(SessionState.SignedOut, Failure: AuthFailureKind.AccessDenied), Jst);
 
         Assert.StartsWith("未ログイン", text);
         Assert.Contains("拒否", text);

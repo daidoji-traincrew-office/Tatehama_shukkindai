@@ -15,7 +15,7 @@ public sealed record AccessTokenFile(
 
     public static AccessTokenFile Create(string accessToken, DateTimeOffset expiresAt)
     {
-        return new AccessTokenFile(CurrentVersion, accessToken, expiresAt.ToUnixTimeSeconds());
+        return new(CurrentVersion, accessToken, expiresAt.ToUnixTimeSeconds());
     }
 
     public byte[] ToJsonBytes()

@@ -18,8 +18,8 @@ public sealed class MainForm : Form
         _sessionManager = sessionManager;
 
         Text = "出勤台クライアント";
-        ClientSize = new Size(480, 140);
-        MinimumSize = new Size(400, 180);
+        ClientSize = new(480, 140);
+        MinimumSize = new(400, 180);
         StartPosition = FormStartPosition.CenterScreen;
 
         var buttons = new FlowLayoutPanel
@@ -32,12 +32,12 @@ public sealed class MainForm : Form
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(16),
+            Padding = new(16),
             ColumnCount = 1,
             RowCount = 2,
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new(SizeType.Percent, 100));
+        layout.RowStyles.Add(new(SizeType.AutoSize));
         layout.Controls.Add(_statusLabel, 0, 0);
         layout.Controls.Add(buttons, 0, 1);
         Controls.Add(layout);
@@ -93,7 +93,10 @@ public sealed class MainForm : Form
         }
     }
 
-    private async void OnSignInClick(object? sender, EventArgs e)
+    // async void のハンドラーにしない(例外はメソッドの中で受け止める)
+    private void OnSignInClick(object? sender, EventArgs e) => _ = SignIn();
+
+    private async Task SignIn()
     {
         using var cancellation = new CancellationTokenSource(SignInTimeout);
         _signInCancellation = cancellation;
@@ -114,7 +117,9 @@ public sealed class MainForm : Form
         }
     }
 
-    private async void OnSignOutClick(object? sender, EventArgs e)
+    private void OnSignOutClick(object? sender, EventArgs e) => _ = SignOut();
+
+    private async Task SignOut()
     {
         _signOutButton.Enabled = false;
         try

@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using OpenIddict.Abstractions;
 using OpenIddict.Client;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Abstractions.OpenIddictExceptions;
@@ -21,12 +20,12 @@ public sealed class ShukkindaiAuthClient(
     {
         try
         {
-            var challenge = await service.ChallengeInteractivelyAsync(new OpenIddictClientModels.InteractiveChallengeRequest
+            var challenge = await service.ChallengeInteractivelyAsync(new()
             {
                 Issuer = _issuer,
                 CancellationToken = cancellationToken,
             });
-            var result = await service.AuthenticateInteractivelyAsync(new OpenIddictClientModels.InteractiveAuthenticationRequest
+            var result = await service.AuthenticateInteractivelyAsync(new()
             {
                 Nonce = challenge.Nonce,
                 CancellationToken = cancellationToken,
@@ -47,7 +46,7 @@ public sealed class ShukkindaiAuthClient(
     {
         try
         {
-            var result = await service.AuthenticateWithRefreshTokenAsync(new OpenIddictClientModels.RefreshTokenAuthenticationRequest
+            var result = await service.AuthenticateWithRefreshTokenAsync(new()
             {
                 Issuer = _issuer,
                 RefreshToken = refreshToken,
@@ -70,7 +69,7 @@ public sealed class ShukkindaiAuthClient(
     {
         try
         {
-            await service.RevokeTokenAsync(new OpenIddictClientModels.RevocationRequest
+            await service.RevokeTokenAsync(new()
             {
                 Issuer = _issuer,
                 Token = refreshToken,
@@ -104,7 +103,7 @@ public sealed class ShukkindaiAuthClient(
     {
         if (exception is not ProtocolException protocol)
         {
-            return new AuthResult.Failed(AuthFailureKind.Transient, Description: exception.GetType().Name);
+            return new(AuthFailureKind.Transient, Description: exception.GetType().Name);
         }
 
         var kind = protocol.Error switch
@@ -114,6 +113,6 @@ public sealed class ShukkindaiAuthClient(
             Errors.InvalidGrant => AuthFailureKind.InvalidGrant,
             _ => AuthFailureKind.Transient,
         };
-        return new AuthResult.Failed(kind, protocol.Error, protocol.ErrorDescription);
+        return new(kind, protocol.Error, protocol.ErrorDescription);
     }
 }
