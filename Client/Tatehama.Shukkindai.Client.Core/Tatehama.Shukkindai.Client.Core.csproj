@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="OpenIddict.Client" Version="7.8.0" />
+    <PackageReference Include="OpenIddict.Client.SystemIntegration" Version="7.8.0" />
+    <PackageReference Include="OpenIddict.Client.SystemNetHttp" Version="7.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Common\Tatehama.Shukkindai.TokenFile\Tatehama.Shukkindai.TokenFile.csproj" />
+  </ItemGroup>
+
+</Project>

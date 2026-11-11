@@ -1,4 +1,11 @@
 <Solution>
+  <Folder Name="/Client/">
+    <Project Path="Client/Tatehama.Shukkindai.Client.Core/Tatehama.Shukkindai.Client.Core.csproj" />
+    <Project Path="Client/Tatehama.Shukkindai.Client.UT/Tatehama.Shukkindai.Client.UT.csproj" />
+  </Folder>
+  <Folder Name="/Common/">
+    <Project Path="Common/Tatehama.Shukkindai.TokenFile/Tatehama.Shukkindai.TokenFile.csproj" />
+  </Folder>
   <Folder Name="/Server/">
     <Project Path="Server/Tatehama.Shukkindai.Server.IT/Tatehama.Shukkindai.Server.IT.csproj" />
     <Project Path="Server/Tatehama.Shukkindai.Server.UT/Tatehama.Shukkindai.Server.UT.csproj" />
