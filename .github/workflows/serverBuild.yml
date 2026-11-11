@@ -10,6 +10,7 @@ env:
   REGISTRY: ghcr.io
   OWNER: ${{ github.repository_owner }}
   IMAGE_NAME: ${{ github.event.repository.name }}_server
+  MIGRATE_IMAGE_NAME: ${{ github.event.repository.name }}_server_migrate
 
 jobs:
   build:
@@ -21,14 +22,17 @@ jobs:
       id-token: write
     steps:
       # ghcr.io/<owner>/tatehama_shukkindai_server:<ブランチ名の / を _ に>(すべて小文字)
+      # マイグレーション用(atlas + migrations/)は tatehama_shukkindai_server_migrate に同じタグで置く
       - name: Calc image name
         id: calc_image_name
         run: |
-          branch=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|_|g')
+          branch=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|_|g' | tr '[:upper:]' '[:lower:]')
           repository=$(echo "${REGISTRY}/${OWNER}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
-          tag=$(echo "${repository}:${branch}" | tr '[:upper:]' '[:lower:]')
+          migrate_repository=$(echo "${REGISTRY}/${OWNER}/${MIGRATE_IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
           echo "Repository=$repository" >> "$GITHUB_OUTPUT"
-          echo "Tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Tag=${repository}:${branch}" >> "$GITHUB_OUTPUT"
+          echo "MigrateRepository=$migrate_repository" >> "$GITHUB_OUTPUT"
+          echo "MigrateTag=${migrate_repository}:${branch}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -59,4 +63,21 @@ jobs:
         with:
           subject-name: ${{ steps.calc_image_name.outputs.Repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      # COPY だけなので QEMU は使わない
+      - name: Build and push (migrate)
+        id: push_migrate
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: Server/Database
+          file: Server/Database/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.calc_image_name.outputs.MigrateTag }}
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.calc_image_name.outputs.MigrateRepository }}
+          subject-digest: ${{ steps.push_migrate.outputs.digest }}
           push-to-registry: true
