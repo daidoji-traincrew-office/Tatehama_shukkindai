@@ -22,6 +22,8 @@ public static class ServiceCollectionExtensions
             {
                 builder.AllowAuthorizationCodeFlow()
                     .AllowRefreshTokenFlow();
+                // ログイン途中の状態(state トークン)は、同じプロセスの中だけで受け渡す。DB(OpenIddict.Core)は使わない
+                builder.DisableTokenStorage();
                 builder.AddEphemeralEncryptionKey()
                     .AddEphemeralSigningKey();
                 builder.UseSystemIntegration(integration => integration

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 using OpenIddict.Client;
@@ -11,7 +12,8 @@ namespace Tatehama.Shukkindai.Client.Core;
 /// </summary>
 public sealed class ShukkindaiAuthClient(
     OpenIddictClientService service,
-    IOptions<ShukkindaiClientOptions> options) : IShukkindaiAuthClient
+    IOptions<ShukkindaiClientOptions> options,
+    ILogger<ShukkindaiAuthClient> logger) : IShukkindaiAuthClient
 {
     private readonly Uri _issuer = new(options.Value.Issuer);
 
@@ -36,6 +38,7 @@ public sealed class ShukkindaiAuthClient(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
+            logger.LogWarning(e, "出勤台とのやり取りに失敗した。");
             return ToFailure(e);
         }
     }
@@ -58,6 +61,7 @@ public sealed class ShukkindaiAuthClient(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
+            logger.LogWarning(e, "出勤台とのやり取りに失敗した。");
             return ToFailure(e);
         }
     }
@@ -77,6 +81,7 @@ public sealed class ShukkindaiAuthClient(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
+            logger.LogWarning(e, "refresh token の revoke に失敗した。");
             return false;
         }
     }
