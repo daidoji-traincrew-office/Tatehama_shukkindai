@@ -5,3 +5,5 @@ obj/
 .vs/
 TestResults/
 **/cert/
+# 出勤台クライアントの接続先(ホスト名はリポジトリに置かない)
+Client/Tatehama.Shukkindai.Client/appsettings.Local.json

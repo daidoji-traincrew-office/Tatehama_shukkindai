@@ -19,7 +19,7 @@ public static class ServiceCollectionExtensions
         if (!Uri.TryCreate(settings.Issuer, UriKind.Absolute, out var issuer))
         {
             throw new InvalidOperationException(
-                $"{ShukkindaiClientOptions.SectionName}:{nameof(ShukkindaiClientOptions.Issuer)} に、出勤台の issuer を絶対 URI で設定してください(appsettings.json)。");
+                $"{ShukkindaiClientOptions.SectionName}:{nameof(ShukkindaiClientOptions.Issuer)} に、出勤台の issuer を絶対 URI で設定してください(exe と同じフォルダの appsettings.Local.json)。");
         }
 
         services.AddOpenIddict()

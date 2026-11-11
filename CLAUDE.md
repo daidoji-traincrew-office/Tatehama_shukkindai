@@ -15,6 +15,7 @@ dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 - ローカルの restore で `NETSDK1226`(prune package data が無い)が出たら、`AllowMissingPrunePackageData=true` を環境変数かプロパティで付ける(SDK に ASP.NET Core の targeting pack が無い環境の回避策。CI では不要)。
 
 ### Windows クライアントの確認(手動)
+接続先はリポジトリに置かないので、先に `Client/Tatehama.Shukkindai.Client/appsettings.Local.json`(.gitignore 済み)を作る: `{"Shukkindai":{"Issuer":"https://<dev のホスト>/"}}`。
 ```
 dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-contained -o <dir>
 ```
@@ -27,7 +28,7 @@ dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-co
 ### CI(GitHub Actions)
 Client も置くので、Server 用の workflow とイメージには `server` を付けている。
 - `clientUnitTest.yml`: Client の UT(トリガーは serverUnitTest.yml と同じ。slnx 全体をビルドする)。
-- `clientBuild.yml`: push ごとに出勤台クライアント(win-x64、self-contained)を publish し、artifact `tatehama-shukkindai-client-dev-<ブランチ>-<sha>` に置く。接続先は `appsettings.json` の `Shukkindai:Issuer`(今は dev。コードに既定値は無い)。
+- `clientBuild.yml`: push ごとに出勤台クライアント(win-x64、self-contained)を publish し、artifact `tatehama-shukkindai-client-dev-<ブランチ>-<sha>` に置く。接続先は Secret `SHUKKINDAI_ISSUER_DEV` から `appsettings.Local.json` を作って入れる(コードと `appsettings.json` に既定値は無い)。
 - `serverUnitTest.yml` / `serverIntegrationTest.yml`: push と PR で UT / IT を走らせる(IT は `Server/compose.yml` の DB を使う)。open な PR があるブランチの push はスキップし、PR 側で走る。
 - `serverBuild.yml`: push ごとに `Server/Dockerfile` をビルドし、`ghcr.io/daidoji-traincrew-office/tatehama_shukkindai_server:<ブランチ名の / を _ に>` へ amd64/arm64 で push する(dev は今もホストでビルドしている)。
 
@@ -115,4 +116,4 @@ atlas migrate diff <名前> --env local    # schema.sql を変えたら diff を
 
 ## 秘密情報
 Discord の ClientSecret / BotToken はリポジトリに置かない。User Secrets(`dotnet user-secrets`)か環境変数(`Discord__ClientSecret` など)で渡す。appsettings*.json には書かない。証明書(`cert/`。pfx は秘密鍵を含む)もコミットしない。
-prod・dev のホスト名(issuer の URL)もリポジトリに置かない(public のため)。Server は環境変数 `Authentication__Issuer` で渡す(`appsettings.json` に既定値は無い)。ドキュメントでは `<prod のホスト>` のように書く。
+prod・dev のホスト名(issuer の URL)もリポジトリに置かない(public のため)。Server は環境変数 `Authentication__Issuer` で渡す(`appsettings.json` に既定値は無い)。クライアントは `appsettings.Local.json`(.gitignore 済み)、CI は Secret `SHUKKINDAI_ISSUER_DEV`。ドキュメントでは `<prod のホスト>` のように書く。

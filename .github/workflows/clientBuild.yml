@@ -1,7 +1,8 @@
 name: Client Build
 
 # 出勤台クライアント(Windows、win-x64 の self-contained)をビルドし、artifact に置く。
-# 接続先は Client/Tatehama.Shukkindai.Client/appsettings.json の Shukkindai:Issuer(今は dev)。prod 版は prod ができてから足す。
+# 接続先(Shukkindai:Issuer)は Secret SHUKKINDAI_ISSUER_DEV から appsettings.Local.json を作って入れる(ホスト名はリポジトリに置かない)。
+# prod 版は prod ができてから足す。
 on:
   push: { }
   workflow_dispatch: { }
@@ -31,6 +32,16 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
         run: echo "name=tatehama-shukkindai-client-dev-${REF_NAME//\//_}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Write appsettings.Local.json
+        env:
+          ISSUER: ${{ secrets.SHUKKINDAI_ISSUER_DEV }}
+        run: |
+          if [ -z "$ISSUER" ]; then
+            echo "::error::Secret SHUKKINDAI_ISSUER_DEV が設定されていない"
+            exit 1
+          fi
+          jq -n --arg issuer "$ISSUER" '{Shukkindai: {Issuer: $issuer}}' > Client/Tatehama.Shukkindai.Client/appsettings.Local.json
 
       - name: Publish
         run: dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-contained -o out
