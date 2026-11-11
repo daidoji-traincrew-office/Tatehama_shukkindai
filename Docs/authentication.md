@@ -122,11 +122,13 @@ services:
 
 ## 他のアプリへのトークンの渡し方(ATS など)
 
-出勤台クライアントが、アクセストークンだけを DPAPI で暗号化したファイルに書き出し、他のアプリ(ATS: .NET 8 + WinForms)がそれを読む。前提: 両方が同じ Windows ユーザー(一般ユーザー)で動く。**実装は Client のリポジトリ側で行う(この文書は契約)。**
+出勤台クライアントが、アクセストークンだけを DPAPI で暗号化したファイルに書き出し、他のアプリ(ATS: .NET 8 + WinForms)がそれを読む。前提: 両方が同じ Windows ユーザー(一般ユーザー)で動く。実装は `Client/`(書き込み)と `Common/Tatehama.Shukkindai.TokenFile`(読み書きの共通ライブラリ)にある。
 
 - 暗号化: `ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser)`。`LocalMachine` は使わない(同じ PC の全ユーザーが復号できてしまう)。
 - 中身(暗号化前): UTF-8 の JSON。`{"version":1,"access_token":"...","expires_at":<exp の Unix 秒>}`。**refresh token は入れない**(refresh token は rolling なので、他のアプリが読んで使うと、クライアントの保存内容が古くなり、同じ authorization のトークンが連鎖して失効しうる)。
-- 保存先とファイル名: 具体的な場所(例: `%LOCALAPPDATA%\Tatehama.Shukkindai\access-token.bin`)は Client 実装時に決めて、ここに追記する。refresh token のファイルとは別にする。
+- 保存先とファイル名: アクセストークンは `%LOCALAPPDATA%\Tatehama.Shukkindai\access-token.bin`。refresh token は別ファイル `refresh-token.bin`(同じディレクトリ。DPAPI。**他のアプリは読まない**)。
+- 読み取り側(.NET 8)は `Common/Tatehama.Shukkindai.TokenFile` の `AccessTokenFileReader` を使える(`DpapiTokenProtector` と `TokenFilePaths.AccessToken` を渡す。結果は Valid / Expired / Missing / Unreadable / UnknownVersion)。
+- 出勤台クライアントは二重起動しない(`Mutex` 名 `Local\Tatehama.Shukkindai.Client`)。同じ refresh token を 2 プロセスが使うと連鎖失効するため。
 - 書き込み(クライアント): 同じディレクトリの一時ファイルに書いてから置き換える(アトミックに)。アクセストークンの期限(1時間)の前(例: 10 分前)に書き直す。ログアウト時はファイルを削除する。
 - 読み取り(他のアプリ): 読み取りに失敗したら少し待って再試行する。`expires_at` を過ぎていたら使わず、「出勤台クライアントを起動してください」と案内して、ファイルの更新を待つ(`FileSystemWatcher` か数秒ごとの再読み込み)。トークンを検証するのは各サービス側(署名公開鍵は上の節)。他のアプリは自分ではログインしない。
 - `version` が知らない値のときは読み込まない。形式を変えるときは `version` を上げる。

@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/Client/">
+    <Project Path="Client/Tatehama.Shukkindai.Client/Tatehama.Shukkindai.Client.csproj" />
     <Project Path="Client/Tatehama.Shukkindai.Client.Core/Tatehama.Shukkindai.Client.Core.csproj" />
     <Project Path="Client/Tatehama.Shukkindai.Client.UT/Tatehama.Shukkindai.Client.UT.csproj" />
   </Folder>

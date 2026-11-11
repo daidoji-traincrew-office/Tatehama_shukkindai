@@ -6,6 +6,7 @@
 ```
 dotnet build Tatehama_shukkindai.slnx
 dotnet test --project Server/Tatehama.Shukkindai.Server.UT
+dotnet test --project Client/Tatehama.Shukkindai.Client.UT
 docker compose -f Server/compose.yml up -d --wait   # IT の前に DB(ポート 5434)を起動
 dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 ```
@@ -13,8 +14,19 @@ dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 - TreatWarningsAsErrors を有効にしている。警告ゼロを保つこと。
 - ローカルの restore で `NETSDK1226`(prune package data が無い)が出たら、`AllowMissingPrunePackageData=true` を環境変数かプロパティで付ける(SDK に ASP.NET Core の targeting pack が無い環境の回避策。CI では不要)。
 
+### Windows クライアントの確認(手動)
+```
+dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-contained -o <dir>
+```
+`<dir>` を Windows に持っていき、`Tatehama.Shukkindai.Client.exe` を起動してログインする。
+- `%LOCALAPPDATA%\Tatehama.Shukkindai\` に `access-token.bin` と `refresh-token.bin` ができる。
+- `appsettings.json` の `Shukkindai:RefreshBeforeExpiry` を `00:59:00` にすると、約 1 分で自動更新される。
+- 再起動すると保存済みの refresh token でログインが復元される。2 つ目を起動すると拒否される。
+- ログアウトで 2 ファイルが消える。
+
 ### CI(GitHub Actions)
 Client も置くので、Server 用の workflow とイメージには `server` を付けている。
+- `clientUnitTest.yml`: Client の UT(トリガーは serverUnitTest.yml と同じ。slnx 全体をビルドする)。
 - `serverUnitTest.yml` / `serverIntegrationTest.yml`: push と PR で UT / IT を走らせる(IT は `Server/compose.yml` の DB を使う)。open な PR があるブランチの push はスキップし、PR 側で走る。
 - `serverBuild.yml`: push ごとに `Server/Dockerfile` をビルドし、`ghcr.io/daidoji-traincrew-office/tatehama_shukkindai_server:<ブランチ名の / を _ に>` へ amd64/arm64 で push する(dev は今もホストでビルドしている)。
 
@@ -49,7 +61,8 @@ C# は JetBrains Rider(ReSharper)の検査で指摘が出ない形で書く。�
 - `Server/Tatehama.Shukkindai.Server.UT`: xUnit v3 + Moq(DB なし)。クラスは `XxxTest`、メソッドは `Method_Condition_Result`
 - `Server/Tatehama.Shukkindai.Server.IT`: WebApplicationFactory + 実 DB(localhost:5434)。`Fixture/`・`Collection/`(`[Collection("WebApplication")]` で fixture を 1 つにまとめる)・`TestUtilities/`
 - `Server/Database/`: Atlas(`schema.sql` があるべき状態、`migrations/` に diff)
-- `Client/`, `Common/`: MVP では空
+- `Client/Tatehama.Shukkindai.Client.Core`(net10.0。OpenIddict.Client のラッパー・`SessionManager`・`StatusText`)、`Client/Tatehama.Shukkindai.Client`(net10.0-windows、WinForms。Generic Host の上で `MainForm` を回す。Linux でもビルドできるよう `EnableWindowsTargeting`)、`Client/Tatehama.Shukkindai.Client.UT`(net10.0。WinForms を参照しない。Windows 固有でない部分だけ UT する)
+- `Common/Tatehama.Shukkindai.TokenFile`(net8.0。トークンファイルの読み書き・DPAPI。ATS(.NET 8)が読み取り側として参照するので net8.0)
 
 ## 崩さない不変条件
 - アクセストークンは JWS(暗号化しない)、RS256、`aud` を付けない。
