@@ -16,6 +16,11 @@ public static class ServiceCollectionExtensions
         services.Configure<ShukkindaiClientOptions>(configuration.GetSection(ShukkindaiClientOptions.SectionName));
         var settings = configuration.GetSection(ShukkindaiClientOptions.SectionName).Get<ShukkindaiClientOptions>()
                        ?? new ShukkindaiClientOptions();
+        if (!Uri.TryCreate(settings.Issuer, UriKind.Absolute, out var issuer))
+        {
+            throw new InvalidOperationException(
+                $"{ShukkindaiClientOptions.SectionName}:{nameof(ShukkindaiClientOptions.Issuer)} に、出勤台の issuer を絶対 URI で設定してください(appsettings.json)。");
+        }
 
         services.AddOpenIddict()
             .AddClient(builder =>
@@ -33,7 +38,7 @@ public static class ServiceCollectionExtensions
                 // openid は付けない(サーバーの discovery に openid が無いので OpenIddict も付けない。id_token は発行されない)
                 builder.AddRegistration(new OpenIddictClientRegistration
                 {
-                    Issuer = new Uri(settings.Issuer),
+                    Issuer = issuer,
                     ClientId = ShukkindaiClientOptions.ClientId,
                     RedirectUri = new Uri($"http://localhost:{settings.RedirectPort}/"),
                     Scopes = { "offline_access" },

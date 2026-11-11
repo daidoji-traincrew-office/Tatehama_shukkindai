@@ -27,6 +27,7 @@ dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-co
 ### CI(GitHub Actions)
 Client も置くので、Server 用の workflow とイメージには `server` を付けている。
 - `clientUnitTest.yml`: Client の UT(トリガーは serverUnitTest.yml と同じ。slnx 全体をビルドする)。
+- `clientBuild.yml`: push ごとに出勤台クライアント(win-x64、self-contained)を publish し、artifact `tatehama-shukkindai-client-dev-<ブランチ>-<sha>` に置く。接続先は `appsettings.json` の `Shukkindai:Issuer`(今は dev。コードに既定値は無い)。
 - `serverUnitTest.yml` / `serverIntegrationTest.yml`: push と PR で UT / IT を走らせる(IT は `Server/compose.yml` の DB を使う)。open な PR があるブランチの push はスキップし、PR 側で走る。
 - `serverBuild.yml`: push ごとに `Server/Dockerfile` をビルドし、`ghcr.io/daidoji-traincrew-office/tatehama_shukkindai_server:<ブランチ名の / を _ に>` へ amd64/arm64 で push する(dev は今もホストでビルドしている)。
 
