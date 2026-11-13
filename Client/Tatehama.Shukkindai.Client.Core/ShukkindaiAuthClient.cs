@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using OpenIddict.Client;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Abstractions.OpenIddictExceptions;
@@ -11,18 +10,16 @@ namespace Tatehama.Shukkindai.Client.Core;
 /// </summary>
 public sealed class ShukkindaiAuthClient(
     OpenIddictClientService service,
-    IOptions<ShukkindaiClientOptions> options,
+    Uri issuer,
     ILogger<ShukkindaiAuthClient> logger) : IShukkindaiAuthClient
 {
-    private readonly Uri _issuer = new(options.Value.Issuer);
-
     public async Task<AuthResult> Login(CancellationToken cancellationToken)
     {
         try
         {
             var challenge = await service.ChallengeInteractivelyAsync(new()
             {
-                Issuer = _issuer,
+                Issuer = issuer,
                 CancellationToken = cancellationToken,
             });
             var result = await service.AuthenticateInteractivelyAsync(new()
@@ -48,7 +45,7 @@ public sealed class ShukkindaiAuthClient(
         {
             var result = await service.AuthenticateWithRefreshTokenAsync(new()
             {
-                Issuer = _issuer,
+                Issuer = issuer,
                 RefreshToken = refreshToken,
                 DisableUserInfo = true,
                 CancellationToken = cancellationToken,
@@ -71,7 +68,7 @@ public sealed class ShukkindaiAuthClient(
         {
             await service.RevokeTokenAsync(new()
             {
-                Issuer = _issuer,
+                Issuer = issuer,
                 Token = refreshToken,
                 TokenTypeHint = TokenTypeHints.RefreshToken,
                 CancellationToken = cancellationToken,

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using OpenIddict.Client;
 using Tatehama.Shukkindai.TokenFile;
 
 namespace Tatehama.Shukkindai.Client.Core;
@@ -10,15 +12,18 @@ public static class ServiceCollectionExtensions
     /// 出勤台クライアントの認証一式を登録する。<see cref="ITokenProtector"/> は呼び出し側が登録する
     /// (Windows では <see cref="DpapiTokenProtector"/>)。
     /// </summary>
-    public static IServiceCollection AddShukkindaiClient(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddShukkindaiClient(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string issuerAddress)
     {
         services.Configure<ShukkindaiClientOptions>(configuration.GetSection(ShukkindaiClientOptions.SectionName));
         var settings = configuration.GetSection(ShukkindaiClientOptions.SectionName).Get<ShukkindaiClientOptions>()
                        ?? new ShukkindaiClientOptions();
-        if (!Uri.TryCreate(settings.Issuer, UriKind.Absolute, out var issuer))
+        if (!Uri.TryCreate(issuerAddress, UriKind.Absolute, out var issuer))
         {
             throw new InvalidOperationException(
-                $"{ShukkindaiClientOptions.SectionName}:{nameof(ShukkindaiClientOptions.Issuer)} に、出勤台の issuer を絶対 URI で設定してください(exe と同じフォルダの appsettings.Local.json)。");
+                "出勤台のissuerが設定されていません。信号メーカーにお問い合わせください。");
         }
 
         services.AddOpenIddict()
@@ -44,7 +49,9 @@ public static class ServiceCollectionExtensions
                 });
             });
 
-        services.AddSingleton<IShukkindaiAuthClient, ShukkindaiAuthClient>();
+        services.AddSingleton<IShukkindaiAuthClient>(sp => new ShukkindaiAuthClient(
+            sp.GetRequiredService<OpenIddictClientService>(), issuer,
+            sp.GetRequiredService<ILogger<ShukkindaiAuthClient>>()));
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(sp => new RefreshTokenStore(
             sp.GetRequiredService<ITokenProtector>(), TokenFilePaths.RefreshToken));

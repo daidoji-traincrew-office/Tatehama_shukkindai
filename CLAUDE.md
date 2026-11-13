@@ -15,7 +15,7 @@ dotnet test --project Server/Tatehama.Shukkindai.Server.IT
 - ローカルの restore で `NETSDK1226`(prune package data が無い)が出たら、`AllowMissingPrunePackageData=true` を環境変数かプロパティで付ける(SDK に ASP.NET Core の targeting pack が無い環境の回避策。CI では不要)。
 
 ### Windows クライアントの確認(手動)
-接続先はリポジトリに置かないので、先に `Client/Tatehama.Shukkindai.Client/appsettings.Local.json`(.gitignore 済み)を作る: `{"Shukkindai":{"Issuer":"https://<dev のホスト>/"}}`。
+接続先はリポジトリに置かないので、先に `Client/Tatehama.Shukkindai.Client/IssuerAddress.cs`(.gitignore 済み)を作る: `namespace Tatehama.Shukkindai.Client; public static class IssuerAddress { public const string Url = "https://<dev のホスト>/"; }`。無いときは `IssuerAddress.Fallback.cs`(空。起動時に例外)でビルドされる。exe の横の json で見えないよう、設定ファイルには置かない。
 ```
 dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-contained -o <dir>
 ```
@@ -28,9 +28,9 @@ dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-co
 ### CI(GitHub Actions)
 Client も置くので、Server 用の workflow とイメージには `server` を付けている。
 - `clientUnitTest.yml`: Client の UT(トリガーは serverUnitTest.yml と同じ。slnx 全体をビルドする)。
-- `clientBuild.yml`: push ごとに出勤台クライアント(win-x64、self-contained)を publish し、artifact `tatehama-shukkindai-client-dev-<ブランチ>-<sha>` に置く。接続先は Secret `SHUKKINDAI_ISSUER_DEV` から `appsettings.Local.json` を作って入れる(コードと `appsettings.json` に既定値は無い)。
+- `clientBuild.yml`: push ごとに出勤台クライアント(win-x64、self-contained)を publish し、artifact `tatehama-shukkindai-client-dev-<ブランチ>-<sha>` に置く。接続先は Secret `SHUKKINDAI_ISSUER_DEV` から `IssuerAddress.cs` を作って埋め込む(コミットされたコードと `appsettings.json` に既定値は無い)。
 - `serverUnitTest.yml` / `serverIntegrationTest.yml`: push と PR で UT / IT を走らせる(IT は `Server/compose.yml` の DB を使う)。open な PR があるブランチの push はスキップし、PR 側で走る。
-- `serverBuild.yml`: push ごとに `Server/Dockerfile` をビルドし、`ghcr.io/daidoji-traincrew-office/tatehama_shukkindai_server:<ブランチ名の / を _ に>` へ amd64/arm64 で push する(dev は今もホストでビルドしている)。
+- `serverBuild.yml`: push ごとに `Server/Dockerfile` をビルドし、`ghcr.io/daidoji-traincrew-office/tatehama_shukkindai_server:<ブランチ名の / を _ に>` へ amd64/arm64 で push する(public。dev はこのイメージを使う)。同じタグで、atlas に migrations を入れたイメージ(`Server/Database/Dockerfile`)を `tatehama_shukkindai_server_migrate` に push する。
 
 ## コードスタイル(Rider 検査)
 C# は JetBrains Rider(ReSharper)の検査で指摘が出ない形で書く。特に次の点。
@@ -86,6 +86,11 @@ dotnet user-secrets set Discord:BotToken <値>
 dotnet user-secrets set Discord:GuildId <ギルドID>
 ```
 DB は `docker compose -f Server/compose.yml up -d`。Development の issuer は `https://localhost:7180/`(ローカルの起動先)。
+実際の Discord でログインを一周させるときは、`ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=https://localhost:7180 dotnet run` で起動し(launchSettings が無いので環境は明示する)、別のターミナルで `Server/tools/local-login.py` を実行する(PKCE の authorize → token → refresh。トークンは表示しない)。dev の Discord アプリの Redirects に `https://localhost:7180/auth/callback` が要る。
+`local-login.py --call '[METHOD ]URL'` で、取ったトークンで他のサービス(Crew の `/me` など)を呼べる。
+
+## dev 環境
+`https://<dev のホスト>/` は MultiATS dev と同じホスト(oracle)で、`Server/deploy/dev/compose.yml`(app・db・migrate。bridge の `172.31.1.0/24` 固定で、`ProxyIP` はそのゲートウェイ)で動かし、`nginx_dev` でリバースプロキシする。イメージは `serverBuild.yml` が ghcr に置いたもの(タグは `.env` の `IMAGE_TAG`)。手順は `Docs/deploy-dev.md`。dev は Production の設定で動かす(`ASPNETCORE_ENVIRONMENT=Development` にしない)。
 
 ## 将来の API を足すとき
 - 既定の認証スキームは Cookie(ログイン途中用)なので、`[Authorize]` だけだと Cookie で判定される。出勤台 API は OpenIddict Validation のスキーム(`OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme`)を明示して認可すること。
@@ -116,4 +121,4 @@ atlas migrate diff <名前> --env local    # schema.sql を変えたら diff を
 
 ## 秘密情報
 Discord の ClientSecret / BotToken はリポジトリに置かない。User Secrets(`dotnet user-secrets`)か環境変数(`Discord__ClientSecret` など)で渡す。appsettings*.json には書かない。証明書(`cert/`。pfx は秘密鍵を含む)もコミットしない。
-prod・dev のホスト名(issuer の URL)もリポジトリに置かない(public のため)。Server は環境変数 `Authentication__Issuer` で渡す(`appsettings.json` に既定値は無い)。クライアントは `appsettings.Local.json`(.gitignore 済み)、CI は Secret `SHUKKINDAI_ISSUER_DEV`。ドキュメントでは `<prod のホスト>` のように書く。
+prod・dev のホスト名(issuer の URL)もリポジトリに置かない(public のため)。Server は環境変数 `Authentication__Issuer` で渡す(`appsettings.json` に既定値は無い)。クライアントは `IssuerAddress.cs`(.gitignore 済み)、CI は Secret `SHUKKINDAI_ISSUER_DEV`。ドキュメントでは `<prod のホスト>` のように書く。

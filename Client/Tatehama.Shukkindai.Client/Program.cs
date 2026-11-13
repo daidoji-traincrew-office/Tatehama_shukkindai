@@ -21,10 +21,8 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
     Args = args,
     ContentRootPath = AppContext.BaseDirectory,
 });
-// 接続先(Shukkindai:Issuer)は、リポジトリに置かない appsettings.Local.json で渡す
-builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true);
 builder.Services.AddSingleton<ITokenProtector, DpapiTokenProtector>();
-builder.Services.AddShukkindaiClient(builder.Configuration);
+builder.Services.AddShukkindaiClient(builder.Configuration, IssuerAddress.Url);
 builder.Services.AddSingleton<MainForm>();
 
 // OpenIddict の SystemIntegration が使うホストを動かしたまま、フォームを回す

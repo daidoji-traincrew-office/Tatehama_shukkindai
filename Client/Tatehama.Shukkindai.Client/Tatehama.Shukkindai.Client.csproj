@@ -15,8 +15,8 @@
 
   <ItemGroup>
     <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <!-- 接続先(Shukkindai:Issuer)。リポジトリには置かない(.gitignore)。CI は Secret から作る -->
-    <Content Include="appsettings.Local.json" Condition="Exists('appsettings.Local.json')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- 接続先は IssuerAddress.cs(.gitignore 済み)。無ければ IssuerAddress.Fallback.cs(空)を使う -->
+    <Compile Remove="IssuerAddress.Fallback.cs" Condition="Exists('IssuerAddress.cs')" />
   </ItemGroup>
 
 </Project>
