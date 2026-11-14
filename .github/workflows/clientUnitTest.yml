@@ -1,0 +1,59 @@
+name: Client Unit Test
+
+on:
+  push: { }
+  pull_request: { }
+  workflow_dispatch: { }
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check-skip:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.check.outputs.should_skip }}
+    steps:
+      # open な PR があるブランチの push は、PR 側の実行に任せてスキップする
+      - id: check
+        name: Check for open PRs (skip push if PR exists)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            count=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$GITHUB_REF_NAME" --state open --json number --jq 'length')
+            if [ "$count" -gt 0 ]; then
+              echo "should_skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "should_skip=false" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: check-skip
+    if: needs.check-skip.outputs.should_skip == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore dependencies
+        run: dotnet restore Tatehama_shukkindai.slnx
+
+      - name: Build
+        run: dotnet build --no-restore Tatehama_shukkindai.slnx
+
+      - name: Unit test
+        run: dotnet test --project Client/Tatehama.Shukkindai.Client.UT --no-build

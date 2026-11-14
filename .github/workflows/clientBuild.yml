@@ -1,0 +1,65 @@
+name: Client Build
+
+# 出勤台クライアント(Windows、win-x64 の self-contained)をビルドし、artifact に置く。
+# 接続先は Secret SHUKKINDAI_ISSUER_DEV から IssuerAddress.cs を作って埋め込む(ホスト名はリポジトリに置かない)。
+# prod 版は prod ができてから足す。
+on:
+  push: { }
+  workflow_dispatch: { }
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-win-x64-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: nuget-win-x64-${{ runner.os }}-
+
+      - name: Calc artifact name
+        id: name
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "name=tatehama-shukkindai-client-dev-${REF_NAME//\//_}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Write IssuerAddress.cs
+        env:
+          ISSUER: ${{ secrets.SHUKKINDAI_ISSUER_DEV }}
+        run: |
+          if [ -z "$ISSUER" ]; then
+            echo "::error::Secret SHUKKINDAI_ISSUER_DEV が設定されていない"
+            exit 1
+          fi
+          # C# の文字列リテラルに埋め込むので、" と \ と改行は受け付けない
+          if [[ "$ISSUER" == *'"'* || "$ISSUER" == *'\'* || "$ISSUER" == *$'\n'* ]]; then
+            echo "::error::Secret SHUKKINDAI_ISSUER_DEV に使えない文字が含まれている"
+            exit 1
+          fi
+          cat > Client/Tatehama.Shukkindai.Client/IssuerAddress.cs <<EOF
+          namespace Tatehama.Shukkindai.Client;
+
+          public static class IssuerAddress
+          {
+              public const string Url = "${ISSUER}";
+          }
+          EOF
+
+      - name: Publish
+        run: dotnet publish Client/Tatehama.Shukkindai.Client -c Release -r win-x64 --self-contained -o out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: out/
+          if-no-files-found: error

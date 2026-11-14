@@ -5,3 +5,7 @@ obj/
 .vs/
 TestResults/
 **/cert/
+
+Client/Tatehama.Shukkindai.Client/IssuerAddress.cs
+# dev 環境の秘密情報(Server/deploy/dev/.env.example をコピーして作る)
+Server/deploy/dev/.env

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>Tatehama.Shukkindai.Client</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tatehama.Shukkindai.Client.Core\Tatehama.Shukkindai.Client.Core.csproj" />
+    <ProjectReference Include="..\..\Common\Tatehama.Shukkindai.TokenFile\Tatehama.Shukkindai.TokenFile.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- 接続先は IssuerAddress.cs(.gitignore 済み)。無ければ IssuerAddress.Fallback.cs(空)を使う -->
+    <Compile Remove="IssuerAddress.Fallback.cs" Condition="Exists('IssuerAddress.cs')" />
+  </ItemGroup>
+
+</Project>
