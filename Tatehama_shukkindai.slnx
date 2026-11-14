@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/Server/">
+    <Project Path="Server/Tatehama.Shukkindai.Server.IT/Tatehama.Shukkindai.Server.IT.csproj" />
+    <Project Path="Server/Tatehama.Shukkindai.Server.UT/Tatehama.Shukkindai.Server.UT.csproj" />
+    <Project Path="Server/Tatehama.Shukkindai.Server/Tatehama.Shukkindai.Server.csproj" />
+  </Folder>
+</Solution>
