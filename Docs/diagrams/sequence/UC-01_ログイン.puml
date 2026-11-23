@@ -56,9 +56,6 @@ else 通常
   opt 社員番号が未発番
     Srv -> Srv : UC-02 社員番号を自動発番
   end
-  opt A3 表示名が変わっている（Q-01-5 推奨案：サーバー内ニックネーム優先）
-    Srv -> DB : 表示名を更新
-  end
   Srv -> Bot : 現在のDiscordロールを取得（D-12。ロールはトークンに含めない）
   Srv --> App : トークンを発行\n・アクセストークン 1時間（sub = DiscordユーザーID、name = Discordのユーザー名）\n・refresh token 7日（使うたびに延長）
 end
@@ -69,7 +66,7 @@ alt E3 最低対応バージョン未満（D-11：呼び出しのたびに判定
   Srv --> App : 426 更新が必要
   App -> User : 更新が必要な旨と配布先を表示
 else
-  Srv --> App : 社員番号・表示名・ロールに応じた機能
+  Srv --> App : 社員番号・表示名（未設定ならDiscordのユーザー名）・\nロールに応じた機能
   App -> User : ホーム画面を表示
 end
 

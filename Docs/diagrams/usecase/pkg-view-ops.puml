@@ -19,7 +19,7 @@ rectangle "閲覧" {
   usecase "UC-22 期限一覧を見る" as UC22
   usecase "UC-23 個人の出勤履歴を見る" as UC23
   usecase "UC-24 確定済み出勤台を見る" as UC24
-  usecase "社員番号・ハンドルネームで検索\n(Q-23-4 推奨)" as Search
+  usecase "社員番号・表示名・\nDiscordのユーザー名で検索\n(Q-23-4 推奨)" as Search
 }
 rectangle "運用" {
   usecase "UC-25 日次DBバックアップ\n(30日+月1つを保持)" as UC25

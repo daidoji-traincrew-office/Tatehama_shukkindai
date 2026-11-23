@@ -26,7 +26,7 @@
 - 寿命は1時間(`exp - iat` = 3600秒)。
 - ユーザー由来の claim は次の2つだけ。ロール・社員番号・登録 ID などは入らない。
   - **`sub`: Discord ユーザー ID(10進数の文字列)。ulong に変換して使うこと。**
-  - `name`: Discord の**ユーザー名**。サーバー内のニックネームや表示名(グローバル名)ではない。出勤台で表示する名前とも別。
+  - `name`: Discord の**ユーザー名**。サーバー内のニックネームやグローバル名ではない。出勤台の表示名(運転会での名義)とも別。
 - そのほかに OpenIddict が付けるプロトコル claim: `iss`(issuer)、`iat`、`exp`、`jti`、`scope`(`offline_access`)、`client_id`、`oi_prst`、`oi_au_id`、`oi_tkn_id`。`nbf` と `aud` は付かない。`oi_*` は OpenIddict 内部用なので、検証側は使わないこと。
 
 実際のトークンの例(テストで発行したもの。値はダミー):

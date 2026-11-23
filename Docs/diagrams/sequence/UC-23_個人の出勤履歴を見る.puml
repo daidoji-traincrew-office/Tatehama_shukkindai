@@ -10,7 +10,7 @@ database "DB" as DB
 alt 本人
   User -> App : 「自分の出勤履歴」を開く
 else 指導員・管理者
-  User -> App : 期限一覧（UC-22）の行から開く\nまたは社員番号・ハンドルネームで検索（Q-23-4 推奨案）
+  User -> App : 期限一覧（UC-22）の行から開く\nまたは社員番号・表示名・\nDiscordのユーザー名で検索（Q-23-4 推奨案）
 end
 App -> API : GET 出勤履歴（対象者）
 alt E1 セッション切れ / 最低バージョン未満
