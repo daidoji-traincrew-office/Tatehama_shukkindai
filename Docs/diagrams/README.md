@@ -8,6 +8,7 @@
 
 - VS Code：拡張機能「PlantUML」（jebbs.plantuml）を入れ、`.puml` を開いて `Alt+D` でプレビューする
 - コマンドライン：`java -jar plantuml.jar -tsvg -charset UTF-8 Docs/diagrams/**/*.puml`
+- PNG にまとめて出す：`Docs/diagrams/render-png.sh`（Docker が要る。`png/` に出力。フォントは初回だけ Noto Sans JP を取得して差し替える）
 - 共通スタイルは `common/style.iuml`。シーケンス図とユースケース図は `!include ../common/style.iuml` で読み込む（フォントは Yu Gothic UI）
 
 ## 一覧
