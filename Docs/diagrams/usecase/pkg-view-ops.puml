@@ -6,8 +6,10 @@ skinparam packageStyle rectangle
 
 actor "本人" as Self
 actor "指導運転士" as InstD
-actor "輸送指導" as InstT
-actor "事業本部\n(管理者)" as Admin
+actor "乗務助役" as SupD
+actor "駅助役" as InstS
+actor "司令長" as InstC
+actor "運営\n(管理者)" as Admin
 actor "ログイン利用者\n(全員)" as Member
 actor "スケジューラ\n(毎日 4:00 JST 推奨)" as Sched <<system>>
 actor "Oracle\nObject Storage" as OS <<external>>
@@ -23,17 +25,21 @@ rectangle "運用" {
   usecase "UC-25 日次DBバックアップ\n(30日+月1つを保持)" as UC25
   usecase "UC-26 復元テスト\n(3ヶ月目安)" as UC26
 }
-rectangle "おもしろ機能（アプリ内のみ）" {
-  usecase "UC-27 アルコール検査" as UC27
+rectangle "点呼（再検討中）" {
+  usecase "UC-27 点呼のアルコール検査\n(サーバー経由・VCで検知音)" as UC27
   usecase "酒飲んでますモード" as Drunk
 }
 
 Self --> UC22 : 自分の行のみ\n(Q-22-1 推奨)
 Self --> UC23 : 自分の記録のみ
-InstD --> UC22 : 運転士系
-InstD --> UC23 : 運転士系
-InstT --> UC22 : 信号・指令系
-InstT --> UC23 : 信号・指令系
+InstD --> UC22 : 見習い運転士
+InstD --> UC23 : 見習い運転士
+SupD --> UC22 : 運転士系
+SupD --> UC23 : 運転士系
+InstS --> UC22 : 信号系
+InstS --> UC23 : 信号系
+InstC --> UC22 : 司令系
+InstC --> UC23 : 司令系
 Admin --> UC22 : すべて
 Admin --> UC23 : すべて
 Member --> UC24 : 全体を閲覧 (D-3)

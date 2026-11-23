@@ -8,7 +8,7 @@ actor "運転士 /\n見習い運転士" as Driver
 actor "参加者本人\n(出勤台に載る人)" as Part
 actor "主催者 /\n共同主催者" as Org
 actor "Discord Bot" as Bot <<system>>
-actor "事業本部\n(管理者)" as Admin
+actor "運営\n(管理者)" as Admin
 
 rectangle "出勤台" {
   usecase "UC-15 行路を希望する\n(1人1行路：D-5)" as UC15

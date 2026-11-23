@@ -2,7 +2,7 @@
 !include ../common/style.iuml
 title UC-04 ロールの付与・削除をリアルタイムで記録する
 autonumber
-actor "ロールを変更する人\n(事業本部など)" as Changer
+actor "ロールを変更する人\n(運営など)" as Changer
 participant "Discord" as Discord
 participant "Discord Bot" as Bot
 participant "APIサーバー" as API

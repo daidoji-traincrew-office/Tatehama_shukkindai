@@ -2,7 +2,7 @@
 !include ../common/style.iuml
 title UC-10 デフォルトのダイヤ・行路を編集する
 autonumber
-actor "事業本部" as Admin
+actor "ダイヤ部\n(運営も可)" as Admin
 participant "デスクトップアプリ" as App
 participant "APIサーバー" as API
 database "DB" as DB
@@ -13,7 +13,7 @@ API -> DB : 取得
 API --> App : ダイヤ一覧（名前）+ バージョン
 note right of App
   閲覧はログインした全員（Q-10-5 推奨案）。
-  事業本部以外は閲覧のみ表示。
+  ダイヤ部・運営以外は閲覧のみ表示。
 end note
 Admin -> App : ダイヤを選ぶ / 新規作成（名前入力）
 opt A2 ダイヤを複製（Q-10-4 推奨案）
@@ -23,7 +23,7 @@ Admin -> App : 列車（列車番号のみ：Q-10-1 推奨案）を追加・変�
 Admin -> App : 行路（行路番号＋名前：Q-10-2 推奨案）と\n担当列車番号の順序付きリストを編集
 Admin -> App : 保存
 App -> API : PUT デフォルトダイヤ（内容 + 手元のバージョン）
-API -> API : 権限チェック：事業本部ロール（D-1）
+API -> API : 権限チェック：ダイヤ部 or 運営ロール（D-1）
 alt E1 権限なし
   API --> App : 403
   App -> Admin : 編集できません

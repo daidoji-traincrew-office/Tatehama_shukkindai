@@ -36,13 +36,13 @@ state "運転会画面（未確定）" as Meet {
 Login --> Home : OAuth成功 /\n保存トークン（refresh）
 Login --> Login : 認可拒否 /\nメンバーでない
 Home --> MeetList
-Home --> Deadline : 指導運転士 / 輸送指導 /\n事業本部 / 本人
+Home --> Deadline : 指導運転士 / 乗務助役 / 駅助役 /\n司令長 / 運営 / 本人
 Home --> History : 自分の履歴
-Home --> DefDia : 事業本部\n（他は閲覧のみ）
+Home --> DefDia : ダイヤ部 / 運営\n（他は閲覧のみ）
 Home --> Alcohol : メニューから
 Alcohol --> Home : 数秒で自動で戻る
 
-MeetList --> MeetEdit : 新規作成\n（指令員 / 事業本部）
+MeetList --> MeetEdit : 新規作成\n（司令長 / 司令長見習い / 運営）
 MeetList --> Meet : 未確定の運転会
 MeetList --> Archived : 確定済みの運転会
 MeetEdit --> Meet : 保存

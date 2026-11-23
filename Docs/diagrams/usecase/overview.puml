@@ -8,10 +8,12 @@ skinparam actorStyle awesome
 ' ===== アクター（Discordロール）=====
 actor "メンバー\n(ログイン利用者)" as Member
 actor "運転士 /\n見習い運転士" as Driver
-actor "信号扱者 / 指令員\n(各見習い含む)" as SigDisp
+actor "信号掛 / 司令員\n(各見習い含む)" as SigDisp
 actor "指導運転士" as InstD
-actor "輸送指導" as InstT
-actor "事業本部\n(管理者)" as Admin
+actor "指導・監督\n(乗務助役 / 駅助役 / 司令長)" as InstT
+actor "乗務主任" as Chief
+actor "ダイヤ部" as DiaDept
+actor "運営\n(管理者・全権限)" as Admin
 ' ===== アクター（運転会ごとの役割）=====
 actor "主催者 /\n共同主催者" as Org
 
@@ -19,6 +21,8 @@ Driver -|> Member
 SigDisp -|> Member
 InstD -|> Member
 InstT -|> Member
+Chief -|> Member
+DiaDept -|> Member
 Admin -|> Member
 Org -|> Member
 
@@ -82,7 +86,9 @@ Member --> UC18
 Driver --> UC15
 InstD --> UC22
 InstT --> UC22
+DiaDept --> UC10
 Admin --> UC10
+Chief --> UC27 : 結果を確認
 Admin --> UC22
 Admin --> UC26
 Org --> UC11

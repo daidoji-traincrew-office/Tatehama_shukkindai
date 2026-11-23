@@ -2,7 +2,7 @@
 !include ../common/style.iuml
 title UC-26 復元テスト（3ヶ月を目安に手動で実施）
 autonumber
-actor "事業本部\n(管理者)" as Admin
+actor "運営\n(管理者)" as Admin
 participant "Oracle\nObject Storage" as OS
 participant "管理者PC上の\nコンテナ（復元先）" as Env
 participant "運用記録ファイル\n(リポジトリ内)" as Log

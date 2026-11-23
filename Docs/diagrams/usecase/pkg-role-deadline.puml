@@ -6,11 +6,11 @@ skinparam packageStyle rectangle
 
 actor "Discord" as Discord <<external>>
 actor "Discord Bot" as Bot <<system>>
-actor "スケジューラ\n(毎朝 9:00 JST 推奨)" as Sched <<system>>
+actor "スケジューラ\n(リマインド 12:00 JST・設定で変更可)" as Sched <<system>>
 actor "指導運転士" as InstD
-actor "輸送指導" as InstT
+actor "駅助役" as InstT
 actor "見習い本人" as Trainee
-actor "事業本部\n(管理者)" as Admin
+actor "運営\n(管理者)" as Admin
 
 rectangle "ロール記録・見習い期限" {
   usecase "UC-04 ロール変化を\nリアルタイム記録" as UC04
@@ -36,7 +36,7 @@ Sched --> UC09
 UC08 ..> UC07 : <<include>>
 UC09 ..> UC07 : <<include>>
 UC08 --> InstD : 見習い運転士分
-UC08 --> InstT : 信号・指令の見習い分
+UC08 --> InstT : 見習い信号掛分
 UC09 --> InstD : 指導者用チャンネル
 UC09 --> InstT : 指導者用チャンネル
 UC09 --> Trainee : DM
